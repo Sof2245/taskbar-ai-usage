@@ -11,8 +11,9 @@ every limit, its reset time and your pace.
 In Windhawk, open **Explore**, search for **Taskbar AI Usage** and install it. If you use Taskbar AI
 Quota Bars, disable it first so both mods don't poll the same accounts.
 
-Claude Code, Codex, Visual Studio and GitHub CLI sign-ins on the PC are picked up automatically.
-Add other accounts from the tile's right-click menu under **Settings**.
+When you enable it, the mod asks whether it may look for Claude Code, Codex, Visual Studio and
+GitHub CLI sign-ins already on the PC and add them. Add other accounts from the tile's right-click
+menu under **Settings**.
 
 The full description is on the mod's page in Windhawk.
 
