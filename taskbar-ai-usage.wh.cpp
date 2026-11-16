@@ -1,9 +1,10 @@
 // ==WindhawkMod==
 // @id              taskbar-ai-usage
 // @name            Taskbar AI Usage
-// @description     Shows your Claude, Codex, Antigravity and GitHub Copilot usage limits as ring tiles on the Windows 11 taskbar, with a Fluent flyout for the details
-// @description:es-ES Muestra los límites de uso de Claude, Codex, Antigravity y GitHub Copilot como mosaicos con anillos en la barra de tareas de Windows 11, con un panel flotante Fluent para los detalles
-// @description:zh-CN 在 Windows 11 任务栏上以圆环磁贴显示 Claude、Codex、Antigravity 和 GitHub Copilot 的用量上限，并通过 Fluent 浮出面板查看详情
+// @description     Shows your Claude, Codex, Antigravity, GitHub Copilot and Cursor usage limits as ring tiles on the Windows 11 taskbar, with a Fluent flyout for the details
+// @description:es-ES Muestra los límites de uso de Claude, Codex, Antigravity, GitHub Copilot y Cursor como mosaicos con anillos en la barra de tareas de Windows 11, con un panel flotante Fluent para los detalles
+// @description:zh-CN 在 Windows 11 任务栏上以圆环磁贴显示 Claude、Codex、Antigravity、GitHub Copilot 和 Cursor 的用量上限，并通过 Fluent 浮出面板查看详情
+// @description:tr-TR Claude, Codex, Antigravity, GitHub Copilot ve Cursor kullanım sınırlarınızı Windows 11 görev çubuğunda halka kutucuklarıyla, ayrıntıları Fluent açılır panelinde gösterir
 // @version         1.0.2
 // @author          Sof2245
 // @github          https://github.com/Sof2245
@@ -34,6 +35,7 @@ whether you are burning through it faster than the clock.
 * **Antigravity.** Gemini and other-model pools, each with session and weekly
   quotas.
 * **GitHub Copilot.** Monthly AI credits.
+* **Cursor.** Weekly or monthly included usage, Auto and API usage, and on-demand spend.
 
 ### Features
 
@@ -119,11 +121,14 @@ Cooldowns survive reloads; the flyout keeps the last reading and shows the next 
     sign-in at Google.
   * GitHub Copilot: `github.com` (device sign-in) and `api.github.com` (user,
     Copilot quota).
+  * Cursor: `api2.cursor.sh` (sign-in poll, token refresh, usage) and
+    `cursor.com` (sign-in page, plan and on-demand).
 * **Client identities.** Sign-in uses the public OAuth clients of Claude Code,
   Codex, Antigravity and GitHub Copilot (copilot.vim). The Claude usage request
   identifies itself as the Claude Code CLI, because the server only returns the
   free-resets data to it. Antigravity requests use the Antigravity app's user
-  agent.
+  agent. Cursor uses its own loginDeepControl + PKCE sign-in flow and the
+  IDE client identity for token refresh.
 * **Scopes requested.**
   * Claude: `org:create_api_key user:profile user:inference`.
   * OpenAI: `openid profile email offline_access api.connectors.read
@@ -133,9 +138,11 @@ Cooldowns survive reloads; the flyout keeps the last reading and shows the next 
     no narrower scope. A scope never grants more than your Google account
     already has.
   * GitHub: `read:user`.
+  * Cursor: a session without requested scopes.
 
   A borrowed sign-in keeps whatever scopes its own app requested.
 * **On this PC.**
+  * Cursor uses polling without a local listener; local Cursor credentials are never read.
   * During a sign-in only (up to 3 minutes), a listener on `127.0.0.1` receives
     the browser redirect: ports 1455/1457 for OpenAI, 51121 for Google.
   * To find a running Antigravity session, the mod reads the command line of
@@ -161,9 +168,9 @@ Cooldowns survive reloads; the flyout keeps the last reading and shows the next 
   [Taskbar Fluent Media Player](https://github.com/Salyts/Taskbar-Fluent-Media-Player)
   by Salyts.
 * Provider logos come from [Simple Icons](https://simpleicons.org)
-  (CC0); the Copilot logo is from
+  (CC0, including Cursor); the Copilot logo is from
   [Primer Octicons](https://github.com/primer/octicons) (MIT, GitHub Inc.).
-* Claude, Anthropic, OpenAI, Codex, Gemini, Antigravity, GitHub and Copilot are
+* Claude, Anthropic, OpenAI, Codex, Gemini, Antigravity, GitHub, Copilot and Cursor are
   trademarks of their owners. Their names and logos appear only to identify
   which account a tile belongs to.
 
@@ -173,6 +180,20 @@ Found a problem or have an idea?
 [Open an issue on GitHub](https://github.com/Sof2245/taskbar-ai-usage/issues).
 */
 // ==/WindhawkModReadme==
+
+// ==WindhawkModSettings==
+/*
+- uiLanguage: auto
+  $name: UI language / Arayüz dili
+  $description: Reopen windows to apply the selected language. / Seçilen dil için pencereleri yeniden açın.
+  $options:
+  - auto: Otomatik (Windows dili)
+  - en: English
+  - es: Español
+  - zh-Hans: 简体中文
+  - tr: Türkçe
+*/
+// ==/WindhawkModSettings==
 
 // Windhawk implicitly includes windhawk_api.h (and thus windows.h) before this file,
 // so winsock2.h can't be ordered ahead of windows.h here. WIN32_LEAN_AND_MEAN (set in
@@ -672,6 +693,8 @@ enum class Str : int {
     SettingsGroupTiles,
     SettingsGroupPlacement,
     SettingsChooseNamedColor,
+    CursorSignInInstructions,
+    CursorOnDemand,
     CopilotProvider,
     CopilotMonthlyCredits,
     CopilotUnlimited,
@@ -1145,6 +1168,8 @@ static const PCWSTR kStringsEn[] = {
     /* SettingsGroupTiles */ L"Tiles",
     /* SettingsGroupPlacement */ L"Placement",
     /* SettingsChooseNamedColor */ L"Choose {0}",
+    /* CursorSignInInstructions */ L"Approve the sign-in in the browser. This window closes when Cursor confirms.",
+    /* CursorOnDemand */ L"On-demand",
     /* CopilotProvider */ L"GitHub Copilot",
     /* CopilotMonthlyCredits */ L"Monthly AI credits",
     /* CopilotUnlimited */ L"Unlimited",
@@ -1210,11 +1235,11 @@ static const PCWSTR kStringsEn[] = {
     /* SettingsAboutViewLicense */ L"View license",
     /* SettingsGroupNotices */ L"Notices",
     /* SettingsAboutDisclaimer */ L"Disclaimer",
-    /* SettingsAboutDisclaimerText */ L"Anthropic, Claude, OpenAI, Codex, Antigravity, Gemini, GitHub Copilot or any of its affiliates and their associated names, trademarks, logos, and other identifying marks are the exclusive property of their respective rights holders. Any reference to or use of such marks is made solely for identification and informational purposes and does not imply any affiliation with, sponsorship by, endorsement from, or authorization by the respective trademark owners.",
+    /* SettingsAboutDisclaimerText */ L"Anthropic, Claude, OpenAI, Codex, Antigravity, Gemini, GitHub Copilot, Cursor or any of its affiliates and their associated names, trademarks, logos, and other identifying marks are the exclusive property of their respective rights holders. Any reference to or use of such marks is made solely for identification and informational purposes and does not imply any affiliation with, sponsorship by, endorsement from, or authorization by the respective trademark owners.",
     /* SettingsAboutUsage */ L"Usage",
     /* SettingsAboutUsageText */ L"Usage figures come exclusively from the providers undocumented endpoints and may be incomplete, delayed or wrong and can change or stop working without notice. The author is not responsible for any of the information provided or its accuracy.",
     /* SettingsAboutData */ L"Data",
-    /* SettingsAboutDataText */ L"Sign-in uses the public OAuth clients of Claude Code, Codex, Antigravity and GitHub Copilot. Accounts that use the CLI login only read that sign-in; the mod never refreshes, rotates or stores it. If you allow it for an account, the mod starts Claude Code hidden when its sign-in has expired, without your hooks, plugins or MCP servers, so that Claude Code renews and rewrites its own credentials.",
+    /* SettingsAboutDataText */ L"Sign-in uses the public OAuth clients of Claude Code, Codex, Antigravity, GitHub Copilot and Cursor. Accounts that use the CLI login only read that sign-in; the mod never refreshes, rotates or stores it. If you allow it for an account, the mod starts Claude Code hidden when its sign-in has expired, without your hooks, plugins or MCP servers, so that Claude Code renews and rewrites its own credentials.",
     /* SettingsAboutPrivacy */ L"Privacy",
     /* SettingsAboutPrivacyText */ L"Tokens are stored only on this PC, encrypted with Windows DPAPI for your user account. Each token is sent only to the sign-in and usage endpoints of the provider that issued it. No telemetry is sent.",
     /* SettingsAboutNoWarranty */ L"No warranty",
@@ -1617,6 +1642,8 @@ static const PCWSTR kStringsEs[] = {
     /* SettingsGroupTiles */ L"Mosaicos",
     /* SettingsGroupPlacement */ L"Ubicación",
     /* SettingsChooseNamedColor */ L"Elegir {0}",
+    /* CursorSignInInstructions */ L"Aprueba el inicio de sesión en el navegador. Esta ventana se cierra cuando Cursor lo confirma.",
+    /* CursorOnDemand */ L"Bajo demanda",
     /* CopilotProvider */ L"GitHub Copilot",
     /* CopilotMonthlyCredits */ L"Créditos de IA mensuales",
     /* CopilotUnlimited */ L"Sin límite",
@@ -1682,11 +1709,11 @@ static const PCWSTR kStringsEs[] = {
     /* SettingsAboutViewLicense */ L"Ver licencia",
     /* SettingsGroupNotices */ L"Avisos",
     /* SettingsAboutDisclaimer */ L"Descargo de responsabilidad",
-    /* SettingsAboutDisclaimerText */ L"Anthropic, Claude, OpenAI, Codex, Antigravity, Gemini, GitHub Copilot o cualquiera de sus afiliados, así como sus nombres, marcas comerciales, logotipos y otros signos distintivos asociados, son propiedad exclusiva de sus respectivos titulares de derechos. Toda referencia a dichos signos o su uso se realiza únicamente con fines de identificación e información y no implica ninguna afiliación, patrocinio, respaldo ni autorización por parte de los respectivos propietarios de las marcas.",
+    /* SettingsAboutDisclaimerText */ L"Anthropic, Claude, OpenAI, Codex, Antigravity, Gemini, GitHub Copilot, Cursor o cualquiera de sus afiliados, así como sus nombres, marcas comerciales, logotipos y otros signos distintivos asociados, son propiedad exclusiva de sus respectivos titulares de derechos. Toda referencia a dichos signos o su uso se realiza únicamente con fines de identificación e información y no implica ninguna afiliación, patrocinio, respaldo ni autorización por parte de los respectivos propietarios de las marcas.",
     /* SettingsAboutUsage */ L"Uso",
     /* SettingsAboutUsageText */ L"Las cifras de uso provienen exclusivamente de los servicios no documentados de los proveedores y pueden estar incompletas, retrasadas o ser incorrectas, y pueden cambiar o dejar de funcionar sin aviso. El autor no se responsabiliza de ninguna de la información proporcionada ni de su exactitud.",
     /* SettingsAboutData */ L"Datos",
-    /* SettingsAboutDataText */ L"El inicio de sesión usa los clientes OAuth públicos de Claude Code, Codex, Antigravity y GitHub Copilot. Las cuentas que usan el inicio de sesión de la CLI solo lo leen; el mod nunca lo renueva, rota ni guarda. Si lo permites en una cuenta, el mod inicia Claude Code oculto cuando su sesión expira, sin tus hooks, plugins ni servidores MCP, para que Claude Code renueve y reescriba sus propias credenciales.",
+    /* SettingsAboutDataText */ L"El inicio de sesión usa los clientes OAuth públicos de Claude Code, Codex, Antigravity, GitHub Copilot y Cursor. Las cuentas que usan el inicio de sesión de la CLI solo lo leen; el mod nunca lo renueva, rota ni guarda. Si lo permites en una cuenta, el mod inicia Claude Code oculto cuando su sesión expira, sin tus hooks, plugins ni servidores MCP, para que Claude Code renueve y reescriba sus propias credenciales.",
     /* SettingsAboutPrivacy */ L"Privacidad",
     /* SettingsAboutPrivacyText */ L"Los tokens se guardan solo en este PC, cifrados con DPAPI de Windows para tu cuenta de usuario. Cada token se envía solo a los servicios de inicio de sesión y de uso del proveedor que lo emitió. No se envía telemetría.",
     /* SettingsAboutNoWarranty */ L"Sin garantía",
@@ -2089,6 +2116,8 @@ static const PCWSTR kStringsZhHans[] = {
     /* SettingsGroupTiles */ L"磁贴",
     /* SettingsGroupPlacement */ L"位置",
     /* SettingsChooseNamedColor */ L"选择{0}",
+    /* CursorSignInInstructions */ L"请在浏览器中确认登录。Cursor 确认后此窗口将关闭。",
+    /* CursorOnDemand */ L"按需用量",
     /* CopilotProvider */ L"GitHub Copilot",
     /* CopilotMonthlyCredits */ L"每月 AI 额度",
     /* CopilotUnlimited */ L"无限制",
@@ -2154,11 +2183,11 @@ static const PCWSTR kStringsZhHans[] = {
     /* SettingsAboutViewLicense */ L"查看许可证",
     /* SettingsGroupNotices */ L"声明",
     /* SettingsAboutDisclaimer */ L"免责声明",
-    /* SettingsAboutDisclaimerText */ L"Anthropic、Claude、OpenAI、Codex、Antigravity、Gemini、GitHub Copilot 或其任何关联方及其相关名称、商标、徽标和其他识别标志均为各自权利持有人的专有财产。对这些标志的任何引用或使用仅用于识别和提供信息，并不表示与相应商标所有者存在任何关联，也不表示获得其赞助、认可或授权。",
+    /* SettingsAboutDisclaimerText */ L"Anthropic、Claude、OpenAI、Codex、Antigravity、Gemini、GitHub Copilot、Cursor 或其任何关联方及其相关名称、商标、徽标和其他识别标志均为各自权利持有人的专有财产。对这些标志的任何引用或使用仅用于识别和提供信息，并不表示与相应商标所有者存在任何关联，也不表示获得其赞助、认可或授权。",
     /* SettingsAboutUsage */ L"用量",
     /* SettingsAboutUsageText */ L"用量数据完全来自提供商未公开文档的接口，可能不完整、有延迟或不准确，并可能随时变更或停止工作，恕不另行通知。作者不对所提供的任何信息及其准确性承担责任。",
     /* SettingsAboutData */ L"数据",
-    /* SettingsAboutDataText */ L"登录使用 Claude Code、Codex、Antigravity 和 GitHub Copilot 的公共 OAuth 客户端。借用 CLI 登录的账户只读取其登录信息，不会刷新、轮换或保存这些信息。如果你为某个账户允许此操作，Claude Code 登录过期时会在后台隐藏启动 Claude Code（不加载你的钩子、插件或 MCP 服务器），由它自行更新并重写自己的凭据。",
+    /* SettingsAboutDataText */ L"登录使用 Claude Code、Codex、Antigravity、GitHub Copilot 和 Cursor 的公共 OAuth 客户端。借用 CLI 登录的账户只读取其登录信息，不会刷新、轮换或保存这些信息。如果你为某个账户允许此操作，Claude Code 登录过期时会在后台隐藏启动 Claude Code（不加载你的钩子、插件或 MCP 服务器），由它自行更新并重写自己的凭据。",
     /* SettingsAboutPrivacy */ L"隐私",
     /* SettingsAboutPrivacyText */ L"令牌仅保存在本电脑上，使用 Windows DPAPI 加密，仅当前 Windows 用户可解密。每个令牌只发送到签发它的提供商的登录和用量接口。不发送任何遥测数据。",
     /* SettingsAboutNoWarranty */ L"无担保",
@@ -2178,13 +2207,487 @@ static const PCWSTR kStringsZhHans[] = {
     /* TilePosTrayLeftOfClock */ L"时钟左侧",
     /* TilePosTrayFarRight */ L"系统托盘最右侧",
 };
+
 // ==== END STRINGS zh-Hans ====
+
+// ==== BEGIN STRINGS tr ====
+static const PCWSTR kStringsTr[] = {
+    /* LoginAnthropicTitle */ L"Oturum aç: {0} (Anthropic)",
+    /* LoginAnthropicInstructions */ L"Tarayıcıda claude.ai açıldı. Erişimi onaylayın, ardından sayfada gösterilen kodu kopyalayıp aşağıya yapıştırın.",
+    /* LoginMissingAuthorizationCode */ L"yetkilendirme kodu eksik",
+    /* ParserExtraUsageUnlimited */ L"ek kullanım: sınırsız",
+    /* ParserRateLimitsNoneReported */ L"hız sınırları: bildirilmedi",
+    /* ParserUnexpectedResponseDetail */ L"beklenmeyen yanıt biçimi ({0})",
+    /* AntigravityNoUsableAntigravityQuotaBucketsInResponse */ L"yanıtta kullanılabilir Antigravity kota grubu yok",
+    /* AntigravityFailedToParseQuotaSummaryJSON */ L"kota özeti JSON verisi ayrıştırılamadı",
+    /* AntigravityNoUserStatusObject */ L"userStatus nesnesi yok",
+    /* AntigravityFailedToParseUserStatusJSON */ L"kullanıcı durumu JSON verisi ayrıştırılamadı",
+    /* AntigravityAntigravityQuotaUnavailable */ L"Antigravity kotası kullanılamıyor",
+    /* AntigravityAntigravityNotRunning */ L"Antigravity çalışmıyor",
+    /* AntigravityNoUsableAntigravityQuotaInResponse */ L"yanıtta kullanılabilir Antigravity kotası yok",
+    /* AntigravityNetworkErrorLanguageServer */ L"ağ hatası (dil sunucusu)",
+    /* AntigravityUnexpectedResponse */ L"beklenmeyen yanıt",
+    /* StatusCliSignInRejected */ L"{0} oturumu reddedildi - yenilemek için {0} uygulamasını açın",
+    /* StatusNotSignedInClickToSignIn */ L"oturum açık değil - oturum açmak için tıklayın",
+    /* StatusCouldNotSaveRefreshedToken */ L"yenilenen belirteç kaydedilemedi",
+    /* StatusSessionExpiredClickToSignIn */ L"oturumun süresi doldu - oturum açmak için tıklayın",
+    /* StatusTokenRefreshFailed */ L"belirteç yenilenemedi",
+    /* StatusNetworkError */ L"ağ hatası",
+    /* StatusUnauthorizedClickToSignIn */ L"yetkisiz - oturum açmak için tıklayın",
+    /* StatusRateLimitedByAPI */ L"API hız sınırına takıldı",
+    /* StatusUnexpectedResponseFormat */ L"beklenmeyen yanıt biçimi",
+    /* StatusHttp */ L"HTTP {0}",
+    /* StatusHttpFromLanguageServer */ L"dil sunucusundan HTTP {0}",
+    /* StatusNoAccessToken */ L"yanıtta erişim belirteci yok",
+    /* StatusInvalidTokenResponse */ L"geçersiz belirteç yanıtı",
+    /* StatusNoRefreshToken */ L"yenileme belirteci yok",
+    /* StatusInternalError */ L"iç hata",
+    /* StatusCliNotSignedIn */ L"{0} oturumu bu bilgisayarda açık değil",
+    /* StatusCouldNotReadCliSignIn */ L"{0} oturumu okunamadı",
+    /* StatusCliSignInExpired */ L"{0} oturumunun süresi doldu - yenilemek için {0} uygulamasını açın",
+    /* StatusClaudeCliRunToRenew */ L"Claude Code oturumunun süresi doldu: claude komutunu çalıştırın",
+    /* StatusFetchThreadFailed */ L"veri alma iş parçacığı başlatılamadı",
+    /* NotificationUsageAt */ L"{0} {1} kullanımı {2}%",
+    /* NotificationResets */ L"Sonraki sıfırlama {0}",
+    /* NotificationReachIn */ L"Bu hızla {0} sınırınıza {1} dolmadan ulaşacaksınız.",
+    /* NotificationQuotaFiveHour */ L"oturum",
+    /* NotificationQuotaWeekly */ L"haftalık",
+    /* NotificationQuotaCredits */ L"kredi",
+    /* NotificationAppName */ L"Taskbar AI Usage",
+    /* NotificationMonthlyExtra */ L"aylık ek kullanım",
+    /* FlyoutRetryDaysHours */ L"{0}g {1}sa",
+    /* FlyoutRetryDays */ L"{0}g",
+    /* FlyoutRetryHoursMinutes */ L"{0}sa {1}dk",
+    /* FlyoutRetryHours */ L"{0}sa",
+    /* FlyoutRetryMinutesSeconds */ L"{0}dk {1}sn",
+    /* FlyoutRetryMinutes */ L"{0}dk",
+    /* FlyoutRetrySeconds */ L"{0}sn",
+    /* FlyoutDayOne */ L"{0} gün",
+    /* FlyoutDayOther */ L"{0} gün",
+    /* FlyoutHourOne */ L"{0} saat",
+    /* FlyoutHourOther */ L"{0} saat",
+    /* FlyoutMinuteOne */ L"{0} dakika",
+    /* FlyoutMinuteOther */ L"{0} dakika",
+    /* FlyoutPaceReached */ L"{0} sınırınıza ulaşıldı.",
+    /* FlyoutPaceAlreadyReached */ L"Bu hızla {0} sınırınıza ulaşmış olabilirsiniz. Kontrol etmek için yenileyin.",
+    /* FlyoutPaceReachIn */ L"Bu hızla sınırınıza {0} dolmadan ulaşacaksınız.",
+    /* FlyoutPaceResetFirst */ L"Bu hızla {0} kotanız, sınıra ulaşmadan önce sıfırlanacaktır.",
+    /* FlyoutPaceCannotEstimate */ L"{0} sınırına ne zaman ulaşılacağını tahmin etmek için yeterli süre geçmedi.",
+    /* FlyoutPaceSummary */ L"Beklenenden hızlı kullanım: {0} kullanıldı, sürenin {1} kadarı geçti. {2}",
+    /* FlyoutResetDetail */ L"Sıfırlama {0}",
+    /* FlyoutNotYetStarted */ L"Henüz başlamadı",
+    /* FlyoutResetTimeUnavailable */ L"Sıfırlama zamanı bilinmiyor",
+    /* FlyoutFreeResetOne */ L"{0} ücretsiz sıfırlama hakkı var",
+    /* FlyoutFreeResetOther */ L"{0} ücretsiz sıfırlama hakkı var",
+    /* FlyoutUpdatedStale */ L"{0} (güncel değil)",
+    /* FlyoutStaleData */ L"Kota verileri güncel değil.",
+    /* FlyoutSignInRequired */ L"Oturum açmanız gerekiyor",
+    /* FlyoutNextExpires */ L"Sonraki sona erme {0}",
+    /* FlyoutCreditsBalance */ L"Kredi: {0}",
+    /* FlyoutRetryIn */ L"{0} · {1} sonra yeniden denenecek",
+    /* FlyoutStaleNextTry */ L"Kota verileri güncel değil · {0} sonra yeniden denenecek",
+    /* FlyoutUpdatedAt */ L"Güncelleme {0}",
+    /* FlyoutUpdated */ L"Güncellendi",
+    /* FlyoutOtherWeekly */ L"Diğer haftalık",
+    /* FlyoutExtraUsage */ L"Ek kullanım",
+    /* FlyoutCreditsUnlimited */ L"Kredi: sınırsız",
+    /* FlyoutCreditsAvailable */ L"Kullanılabilir kredi",
+    /* FlyoutVisualTest */ L"Görsel test",
+    /* FlyoutRefreshing */ L"Yenileniyor…",
+    /* FlyoutNoDataYet */ L"Henüz veri yok",
+    /* FlyoutSignInToSeeUsage */ L"Kullanımı görmek için oturum açın",
+    /* FlyoutThisAccountNeedsABrowserSignIn */ L"Bu hesabın kotasını okumak için önce tarayıcıdan oturum açmanız gerekiyor.",
+    /* FlyoutLoadingUsage */ L"Kullanım yükleniyor…",
+    /* FlyoutNoQuotaDataForTheSelectedArcs */ L"Seçili yaylar için kota verisi yok.",
+    /* FlyoutOpenUsageDashboard */ L"Kullanım panelini aç",
+    /* FlyoutSessionLimit */ L"oturum",
+    /* FlyoutWeeklyLimit */ L"haftalık",
+    /* FlyoutQuotaTooltip */ L"{0}  {1} {2}",
+    /* MenuExitVisualTest */ L"Görsel testten çık",
+    /* MenuRefreshAll */ L"Tümünü yenile",
+    /* MenuOpenDashboard */ L"Paneli aç",
+    /* MenuSettings */ L"Ayarlar...",
+    /* MenuAddAnAIAccountStoredSettingsCould */ L"Bir yapay zekâ hesabı ekleyin. Kayıtlı ayarlar okunamadı; yedeği saklandı.",
+    /* MenuAddAnAIAccount */ L"Yapay zekâ hesabı ekle",
+    /* SettingsThresholdPercentage */ L"Eşik {0} yüzdesi",
+    /* SettingsResetNamedColor */ L"{0} sıfırla",
+    /* SettingsShowMore */ L"Daha fazla ayar göster",
+    /* SettingsShowFewer */ L"Daha az ayar göster",
+    /* SettingsDisplayPrimary */ L"Ekran {0} - {1}x{2} (Birincil)",
+    /* SettingsDisplayOther */ L"Ekran {0} - {1}x{2}",
+    /* SettingsDisplayUnavailable */ L"Ekran {0} - kullanılamıyor",
+    /* SettingsPrimaryTaskbarHeight */ L"Birincil görev çubuğunun yüksekliği {0} px olduğundan buradaki kutucuklar en fazla {1} px olabilir.",
+    /* SettingsNotifyThreshold */ L"{0}%",
+    /* SettingsColumnWeek */ L"Hafta",
+    /* SettingsColumnExtra */ L"Ek",
+    /* SettingsColumnCredits */ L"Kredi",
+    /* SettingsUsesCli */ L"{0} kullanır",
+    /* SettingsResetConfirmation */ L"Bu sayfadaki tüm ayarlar varsayılan değerlerine döner. Hesaplar ve oturumlar korunur.",
+    /* SettingsChangeProviderConfirmation */ L"Bu işlem yeni bir hesap kimliği oluşturur. Eski kayıtlı oturum daha sonra kullanmak üzere saklansın mı, silinsin mi?",
+    /* SettingsRemoveAccountOptions */ L"Hesap artık görev çubuğunda görünmez. Kayıtlı oturumu daha sonra kullanmak üzere saklansın mı, silinsin mi?",
+    /* SettingsDialogYes */ L"Evet",
+    /* SettingsDialogNo */ L"Hayır",
+    /* SettingsDialogAbort */ L"Durdur",
+    /* SettingsDialogRetry */ L"Yeniden dene",
+    /* SettingsDialogIgnore */ L"Yoksay",
+    /* SettingsDialogTryAgain */ L"Tekrar dene",
+    /* SettingsDialogContinue */ L"Devam et",
+    /* SettingsDialogDeleteOldSignIn */ L"Eski oturumu sil",
+    /* SettingsDialogKeepOldSignIn */ L"Eski oturumu sakla",
+    /* SettingsDialogDiscardEdit */ L"Düzenlemeyi iptal et",
+    /* SettingsDialogDeleteSignIn */ L"Oturumu sil",
+    /* SettingsDialogKeepSignIn */ L"Oturumu sakla",
+    /* SettingsRemoveAccountBody */ L"Hesap artık görev çubuğunda görünmez.",
+    /* SettingsResetPageTitle */ L"Bu sayfa sıfırlansın mı?",
+    /* SettingsChangeProviderTitle */ L"Sağlayıcı değiştirilsin mi?",
+    /* SettingsRenamedIdentityRetained */ L"Yeni hesap kimliği için zaten saklanmış bir oturum var. Değiştirmek için o sağlayıcı ve etiketle bir hesap ekleyin, ardından hesabı kaldırıp kayıtlı oturumunu silin. Hesap değiştirilmedi.",
+    /* SettingsCopiedSignInRetained */ L"Hesap kaydedilemedi. Kopyalanan oturum, denenmiş yeni kimlik altında saklanıyor. Silmek için denediğiniz sağlayıcı ve etiketle bir hesap ekleyin, ardından hesabı kaldırıp kayıtlı oturumunu silmeyi seçin.",
+    /* SettingsDuplicateOldSignIn */ L"Hesap yeniden adlandırıldı, ancak eski kimlik altında yinelenen bir kayıtlı oturum kaldı. Silmek için eski sağlayıcı ve etiketle hesabı yeniden ekleyin, ardından hesabı kaldırıp kayıtlı oturumunu silmeyi seçin.",
+    /* SettingsProviderOldSignIn */ L"Sağlayıcı değiştirildi, ancak eski oturum saklanıyor. Kurtarmak veya silmek için eski sağlayıcı ve etiketle hesabı yeniden ekleyin.",
+    /* SettingsRemovedSignInSaveFailed */ L"Kayıtlı oturum silindi, ancak ayarlar kaydedilemedi. Hesap hâlâ yapılandırılmış durumda, fakat oturumu kapalı.",
+    /* SettingsDeletedSignInRetained */ L"Kayıtlı oturum silinemedi ve bu hesap için saklanmaya devam ediyor.",
+    /* SettingsOn */ L"Açık",
+    /* SettingsBaseUsageColor */ L"Temel kullanım rengi",
+    /* SettingsThreshold1Color */ L"Eşik 1 rengi",
+    /* SettingsThreshold2Color */ L"Eşik 2 rengi",
+    /* SettingsThreshold3Color */ L"Eşik 3 rengi",
+    /* SettingsReset */ L"Sıfırla",
+    /* SettingsRestoreDefaults */ L"Varsayılanlara dön",
+    /* SettingsRestoreDefaultsCaption */ L"Bu sayfadaki tüm ayarları varsayılan değerlerine döndürür. Hesaplar ve oturumlar korunur.",
+    /* SettingsAdd */ L"Ekle...",
+    /* SettingsEdit */ L"Düzenle...",
+    /* SettingsRemove */ L"Kaldır",
+    /* SettingsUp */ L"Yukarı",
+    /* SettingsDown */ L"Aşağı",
+    /* SettingsSigningIn */ L"Oturum açılıyor...",
+    /* SettingsNo */ L"Hayır",
+    /* SettingsYes */ L"Evet",
+    /* SettingsUsesLocalSession */ L"Yerel oturumu kullanır",
+    /* SettingsSignedIn */ L"Oturum açık",
+    /* SettingsNotSignedIn */ L"Oturum kapalı",
+    /* SettingsLogicalPixels16To64LimitedBy */ L"Kutucuk boyutu Özel olduğunda kullanılan sabit boyut.",
+    /* SettingsCouldNotSaveSettings */ L"Ayarlar kaydedilemedi.",
+    /* SettingsInfoBarClose */ L"Kapat",
+    /* SettingsCouldNotSaveTheAccount */ L"Hesap kaydedilemedi.",
+    /* SettingsWaitForTheCurrentSignInTo */ L"Kimliği değiştirmeden önce devam eden oturum açma işleminin bitmesini bekleyin.",
+    /* SettingsTheAccountWasChangedFromAnotherTaskbar */ L"Hesap başka bir görev çubuğu penceresinden değiştirildi.",
+    /* SettingsTheStoredSignInCouldNotBe */ L"Kayıtlı oturum kopyalanamadı. Hesap değiştirilmedi.",
+    /* SettingsWaitForTheCurrentSignInTo2 */ L"Hesapları kaldırmadan önce devam eden oturum açma işleminin bitmesini bekleyin.",
+    /* SettingsRemoveThisAccount */ L"Bu hesap kaldırılsın mı?",
+    /* SettingsTheStoredSignInCouldNotBe2 */ L"Kayıtlı oturum silinemediği için hesap kaldırılmadı.",
+    /* SettingsCouldNotRemoveTheAccount */ L"Hesap kaldırılamadı.",
+    /* SettingsCouldNotReorderTheAccount */ L"Hesabın sırası değiştirilemedi.",
+    /* SettingsRescan */ L"Yeniden tara",
+    /* SettingsFindAccountsPrompt */ L"Taskbar AI Usage, bu bilgisayarda oturumu açık yapay zekâ sağlayıcılarını bulup otomatik olarak eklesin mi? Daha sonra Ayarlar bölümünden yeniden tarayabilir veya hesapları tek tek ekleyebilirsiniz.",
+    /* SettingsFindAccounts */ L"Hesapları bul",
+    /* SettingsNotNow */ L"Şimdi değil",
+    /* SettingsRescanNoneFound */ L"Oturumu açık yeni bir yapay zekâ sağlayıcısı bulunamadı.",
+    /* SettingsCouldNotUpdateAccountVisibility */ L"Hesap görünürlüğü güncellenemedi.",
+    /* SettingsCouldNotResetSettings */ L"Ayarlar sıfırlanamadı.",
+    /* SettingsAccounts */ L"Hesaplar",
+    /* SettingsLayout */ L"Düzen",
+    /* SettingsDisplay */ L"Görünüm",
+    /* SettingsBehavior */ L"Davranış",
+    /* SettingsArcs */ L"Yaylar",
+    /* SettingsVisible */ L"Görünür",
+    /* SettingsSignIn */ L"Oturum",
+    /* SettingsPreviewTestData */ L"Test verilerini önizle",
+    /* SettingsShowSyntheticPercentagesWhileThisWindowIs */ L"Görünüm değişikliklerini önizlemek için görev çubuğu kutucuklarında örnek kullanım gösterir.",
+    /* SettingsTaskbarMonitors */ L"Görev çubuğu ekranları",
+    /* SettingsPrimaryMonitorOnly */ L"Yalnızca birincil ekran",
+    /* SettingsAllMonitors */ L"Tüm ekranlar",
+    /* SettingsSpecificDisplay */ L"Belirli ekran",
+    /* SettingsChooseWhereAccountTilesAppear */ L"Hesap kutucuklarının nerede görüneceğini seçin.",
+    /* SettingsUsedWhenTaskbarMonitorsIsSpecificDisplay */ L"Kutucukların görev çubuğunda gösterileceği ekran.",
+    /* SettingsShowQuotaAs */ L"Kotayı gösterme biçimi",
+    /* SettingsUsed */ L"Kullanılan",
+    /* SettingsRemainingLeft */ L"Kalan",
+    /* SettingsFillTheArcsWithWhatIsLeft */ L"Göstergeleri kalan veya kullanılan miktarla doldurur.",
+    /* SettingsTileSize */ L"Kutucuk boyutu",
+    /* SettingsAutomatic */ L"Otomatik",
+    /* SettingsAutomaticFollowsTheTaskbarHeight */ L"Görev çubuğundaki hesap kutucuklarının boyutu.",
+    /* SettingsCustomTileSizePx */ L"Özel kutucuk boyutu (px)",
+    /* SettingsTileSpacingPx */ L"Kutucuk aralığı (px)",
+    /* SettingsSpaceBetweenAccountTiles */ L"Hesap kutucukları arasındaki boşluk.",
+    /* SettingsRightTrayGapPx */ L"Sağ tepsi boşluğu (px)",
+    /* SettingsSpaceBetweenTheLastTileAndThe */ L"Son kutucuk ile sistem tepsisi arasındaki boşluk.",
+    /* SettingsFlyoutMaterial */ L"Açılır panel malzemesi",
+    /* SettingsFlyoutMaterialHelp */ L"Açılır panelin arka plan görünümünü değiştirir.",
+    /* SettingsShowPaceMarkers */ L"Kullanım hızı işaretlerini göster",
+    /* SettingsMarkTheElapsedPartOfEachQuota */ L"Noktalar ve çizgiler, her kota döneminde geçen süreyi gösterir.",
+    /* SettingsShowPersistentMarkers */ L"Kullanım hızı işaretleri hep görünsün",
+    /* SettingsShowPersistentMarkersCaption */ L"Kullanım hızı normal olduğunda da işaretleri gösterir.",
+    /* SettingsPaceMarkerColor */ L"Kullanım hızı işareti rengi",
+    /* SettingsColorOfThePaceDotsAndTicks */ L"Kullanım hızı noktalarının ve çizgilerinin rengi.",
+    /* SettingsShowAmountsForExtraUsageCredits */ L"Ek kullanım/kredi tutarlarını göster",
+    /* SettingsDollarsOrCreditsInsteadOfPercentages */ L"Ek kullanım ve krediler için yüzdeler yerine para veya kredi tutarlarını gösterir.",
+    /* SettingsShowAdditionalOpenAIRateLimits */ L"Ek hız sınırlarını göster",
+    /* SettingsShowAnthropicFableWeeklyLimit */ L"Fable haftalık sınırını göster",
+    /* SettingsMarkStaleDataWith */ L"Güncel olmayan veriyi işaretle",
+    /* SettingsFlagARefreshThatFailedOrIs */ L"Yenileme başarısız olduğunda veya geciktiğinde bir işaret gösterir.",
+    /* SettingsSystemAccent */ L"Sistem vurgu rengi",
+    /* SettingsUseSystemAccentForUsageColors */ L"Kullanım için sistem vurgu rengini kullan",
+    /* SettingsUsageColors */ L"Kullanım renkleri",
+    /* SettingsDefault */ L"Varsayılan",
+    /* SettingsAccessible */ L"Erişilebilir",
+    /* SettingsCloudPollInterval */ L"Sorgulama aralığı",
+    /* Settings2Minutes */ L"2 dakika",
+    /* Settings5Minutes */ L"5 dakika",
+    /* Settings10Minutes */ L"10 dakika",
+    /* Settings15Minutes */ L"15 dakika",
+    /* Settings30Minutes */ L"30 dakika",
+    /* Settings60Minutes */ L"60 dakika",
+    /* SettingsHowOftenAnthropicAndOpenAIQuotasAre */ L"Hesap kotalarının ne sıklıkla kontrol edileceği.",
+    /* SettingsCustomIntervalMinutes */ L"Özel aralık (dakika)",
+    /* SettingsUsedWhenThePollIntervalIsCustom */ L"Sorgulama aralığı Özel olduğunda kota kontrolleri arasındaki süre.",
+    /* SettingsCustomIntervalHelp */ L"2 ile 1440 dakika (24 saate kadar) kabul edilir. Kısa aralıklar daha erken yeniler, ancak sağlayıcılara daha fazla istek gönderir.",
+    /* SettingsNotifyAtThreshold */ L"Eşikte bildirim gönder",
+    /* SettingsNotifyWhenConsumedUsageCrossesThisLevel */ L"Kullanılan miktar bu düzeyi aştığında bildirim gönderir.",
+    /* SettingsTemporarilyReplacesTaskbarAccountsWithSyntheticPercentages */ L"Yalnızca bu ayar penceresi açıkken geçerlidir. Kapatıldığında gerçek kullanım geri gelir.",
+    /* SettingsReplacesThePercentageOnAnthropicExtraUsage */ L"Ek kullanım ve krediler için geçerlidir: Kullanılan modunda harcanan, Kalan modunda kalan tutarı gösterir. Tutar rozetleri, bu ayar açıkken toplamı; kapalıyken kullanılan veya kalan miktarı gösterir.",
+    /* SettingsAddsEveryExtraOpenAIRateLimitCodex */ L"Ek model hız sınırlarını (Codex Spark ve gpt-reserve gibi) açılır panele ve araç ipucuna ekler, varsa Spark plan adını gösterir.",
+    /* SettingsShowsFableWeeklyUsageInTheFlyout */ L"Fable haftalık kullanımını (varsa) açılır panelde ve araç ipucunda gösterir. Gizliyken bildirimleri ve yayı da kapalıdır.",
+    /* SettingsUsesTheWindowsAccentForValidUsage */ L"Varsayılan ve Erişilebilir yerleşik paletlerdir. Özel, aşağıdaki renkleri ve eşikleri kullanır. Sistem vurgu rengi, Windows vurgu rengini kullanır ve özel eşik yüzdelerinizi korur.",
+    /* SettingsTileSizeInLogicalPixels16To */ L"Windows ekran ölçeklendirmesine göre büyüyen 16 ile 64 mantıksal piksel (örneğin %150 ölçekte 40, fiziksel olarak 60 pikseldir). Görev çubuğu yeniden boyutlandırılmaz: daha kısa bir görev çubuğunda kutucuk, çubuğun yüksekliğiyle sınırlıdır; tıklanabilir alan en az 24 px veya görev çubuğu yüksekliği kadardır.",
+    /* SettingsReSign */ L"Yeniden oturum aç",
+    /* SettingsChooseColorsAndWhenTheyApply */ L"Renkleri ve ne zaman uygulanacaklarını seçin.",
+    /* SettingsBaseColor */ L"Temel renk",
+    /* SettingsFirstThreshold */ L"Birinci eşik",
+    /* SettingsSecondThreshold */ L"İkinci eşik",
+    /* SettingsThirdThreshold */ L"Üçüncü eşik",
+    /* SettingsBelowFirstThreshold */ L"Birinci eşiğin altı",
+    /* SettingsAboveFirstThreshold */ L"Birinci eşiğin üstü",
+    /* SettingsNameColorSwatch */ L"{0}, şu an #{1}{2}{3}",
+    /* SettingsNotifyDefaultOne */ L"50%",
+    /* SettingsNotifyDefaultTwo */ L"75%",
+    /* SettingsNotifyDefaultThree */ L"90%",
+    /* SettingsPaceMarkerHelp */ L"Noktalar kutucuk yaylarında, çizgiler açılır panel çubuklarında görünür. Yalnızca sıfırlama zamanı bilinen dönemlerde, kullanım geçen sürenin payından 5 yüzde puanından fazla ileride veya gerideyse görünürler. Kullanım hızı işaretleri hep görünsün ayarıyla sürekli gösterilirler. Güncel olmayan verilerde gizlenirler.",
+    /* SettingsWindowTitle */ L"Taskbar AI Usage Ayarları",
+    /* SettingsAutomaticTileSizeHelp */ L"Otomatik, kutucukları görev çubuğu yüksekliğine göre boyutlandırır. Özel, Özel kutucuk boyutu alanındaki sabit boyutu kullanır.",
+    /* EditorArcsOnTheTile */ L"Kutucuktaki yaylar",
+    /* EditorShowCreditsArcMax */ L"Kredi yayını göster, en fazla:",
+    /* EditorShowMonthlyExtraUsageArc */ L"Aylık ek kullanım yayını göster",
+    /* EditorUseTheCodexSignInOnThis */ L"Bu bilgisayardaki Codex oturumunu kullan",
+    /* EditorUseTheClaudeCodeSignInOn */ L"Bu bilgisayardaki Claude Code oturumunu kullan",
+    /* EditorIcon */ L"Simge",
+    /* EditorProviderLogo */ L"Sağlayıcı logosu",
+    /* EditorCharacterNumberOrSymbol */ L"Karakter, sayı veya sembol",
+    /* EditorIconText */ L"Simge metni",
+    /* EditorShow5HourSessionArc */ L"5 saatlik oturum yayını göster",
+    /* EditorShowWeeklyArc */ L"Haftalık yayı göster",
+    /* EditorOK */ L"Tamam",
+    /* EditorEnterAnAccountLabel */ L"Bir hesap etiketi girin.",
+    /* EditorEnterUpTo2CharactersForThe */ L"Kutucuk simgesi için bir veya iki karakter girin.",
+    /* EditorEnterTheCreditsMaxForTheCredits */ L"Kredi yayı için en yüksek kredi değerini girin.",
+    /* EditorSelectAtLeastOneArc */ L"En az bir yay seçin.",
+    /* EditorThatProviderAndLabelAreAlreadyConfigured */ L"Bu sağlayıcı ve etiket zaten yapılandırılmış.",
+    /* EditorAddAccount */ L"Hesap ekle",
+    /* EditorEditAccount */ L"Hesabı düzenle",
+    /* CommonSignIn */ L"Oturum aç",
+    /* CommonCancel */ L"İptal",
+    /* CommonFableWeekly */ L"Fable haftalık",
+    /* CommonLeft */ L"kalan",
+    /* CommonUsed */ L"kullanılan",
+    /* CommonSession */ L"Oturum",
+    /* CommonWeekly */ L"Haftalık",
+    /* CommonSpent */ L"harcanan",
+    /* CommonRefresh */ L"Yenile",
+    /* CommonSettings */ L"Ayarlar",
+    /* CommonSignOut */ L"Oturumu kapat",
+    /* CommonOff */ L"Kapalı",
+    /* CommonShow */ L"Göster",
+    /* CommonHide */ L"Gizle",
+    /* CommonCustom */ L"Özel",
+    /* CommonProvider */ L"Sağlayıcı",
+    /* CommonLabel */ L"Etiket",
+    /* ResetNow */ L"şimdi",
+    /* ResetInDaysHours */ L"{0}g {1}sa sonra",
+    /* ResetInDays */ L"{0}g sonra",
+    /* ResetInHoursMinutes */ L"{0}sa {1}dk sonra",
+    /* ResetInHours */ L"{0}sa sonra",
+    /* ResetInMinutes */ L"{0}dk sonra",
+    /* ResetAtTime */ L"{0} ({1})",
+    /* ResetAtDayTime */ L"{0} ({1} {2})",
+    /* ErrEmptyBody */ L"boş gövde",
+    /* ErrJsonNoKeys */ L"anahtarsız JSON nesnesi",
+    /* ErrJsonKeys */ L"anahtarlar: {0}",
+    /* ErrInvalidJsonBody */ L"nesne olmayan veya geçersiz JSON gövdesi",
+    /* EditorCustomSvg */ L"Özel SVG",
+    /* EditorChooseSvg */ L"SVG seç...",
+    /* EditorSvgChooseFirst */ L"Önce simge için bir SVG dosyası seçin.",
+    /* EditorSvgDialogTitle */ L"SVG simgesi seç",
+    /* EditorSvgFileFilter */ L"SVG görselleri (*.svg)",
+    /* EditorSvgImported */ L"SVG içe aktarıldı.",
+    /* EditorSvgImportedIgnores */ L"SVG içe aktarıldı. Windows SVG işleyicisinin yok saydıkları: {0}",
+    /* EditorSvgSavedIconUnavailable */ L"Kayıtlı simge dosyası eksik veya bozuk; yerine sağlayıcı logosu gösteriliyor.",
+    /* EditorIconProviderLogoHelp */ L"Kutucukta sağlayıcının logosunu, görev çubuğunun metin renginde gösterir.",
+    /* EditorIconTextHelp */ L"Bu kutuya yazılan bir veya iki karakteri gösterir: harf, rakam, sembol veya emoji. Harfler ve semboller görev çubuğunun metin rengini, emojiler kendi renklerini kullanır.",
+    /* EditorIconSvgHelp */ L"Bu düğmeyle seçilen SVG görselini kendi renkleriyle, kutucuğa sığacak şekilde gösterir. En fazla 256 KB; betikler, animasyon, dış bağlantılar ve DOCTYPE kabul edilmez. Gömülü görseller PNG veya JPEG olmalıdır. Windows SVG işleyicisi maskeleri, metni, <style> sayfalarını, desenleri ve filtreleri yok sayar.",
+    /* SvgErrReadFailed */ L"Dosya okunamadı.",
+    /* SvgErrTooLarge */ L"Dosya 256 KB sınırını aşıyor.",
+    /* SvgErrNotUtf8 */ L"Dosya geçerli UTF-8 metni değil.",
+    /* SvgErrMalformed */ L"Dosya düzgün biçimlendirilmiş SVG (XML) değil.",
+    /* SvgErrNotSvg */ L"Kök öğe bir SVG öğesi değil.",
+    /* SvgErrDtd */ L"DOCTYPE, varlık veya işleme yönergesi içeren SVG kabul edilmez.",
+    /* SvgErrForbidden */ L"Güvenlik nedeniyle izin verilmiyor: {0}.",
+    /* SvgErrTooManyElements */ L"SVG çok fazla öğe içeriyor (sınır 4.096).",
+    /* SvgErrTooDeep */ L"SVG çok fazla iç içe düzey içeriyor (sınır 64 düzey).",
+    /* SvgErrTooManyAttributes */ L"Bir SVG öğesi çok fazla öznitelik içeriyor (sınır 256).",
+    /* SvgErrAttributeTooLong */ L"Bir SVG öznitelik değeri çok uzun.",
+    /* SvgErrTooMuchText */ L"SVG çok fazla metin içeriyor (sınır 65.536 karakter).",
+    /* SvgErrExternalRef */ L"Dış başvurulara izin verilmez; yalnızca #id bağlantıları ve gömülü PNG/JPEG verileri kabul edilir.",
+    /* SvgErrViewBox */ L"SVG geçerli bir viewBox veya genişlik ve yükseklik içermiyor.",
+    /* SvgErrImageData */ L"Gömülü bir görsel PNG/JPEG değil veya 128 KB ya da 1.024 x 1.024 piksel sınırını aşıyor.",
+    /* SvgErrUnavailable */ L"Bu Windows sürümü SVG görüntüleyemiyor.",
+    /* SvgErrRenderFailed */ L"SVG görüntülenemedi.",
+    /* SvgErrEmpty */ L"SVG içinde çizilecek görünür bir içerik yok.",
+    /* SvgErrStoreFailed */ L"Simge kaydedilemedi.",
+    /* AppearanceRowTitle */ L"Görünüm",
+    /* AppearanceRowCaption */ L"Renkleri, eşikleri, düzeni ve kutucuk simgelerini dışa veya içe aktarın.",
+    /* AppearanceExportButton */ L"Dışa aktar...",
+    /* AppearanceImportButton */ L"İçe aktar...",
+    /* AppearanceExportTitle */ L"Görünümü dışa aktar",
+    /* AppearanceImportTitle */ L"Görünümü içe aktar",
+    /* AppearanceFileFilter */ L"Görünüm dosyaları (*.json)",
+    /* AppearanceExportDone */ L"Görünüm şu konuma aktarıldı:\n{0}",
+    /* AppearanceExportFailed */ L"Görünüm dışa aktarılamadı: {0}",
+    /* AppearanceImportFailed */ L"Görünüm içe aktarılamadı: {0}",
+    /* AppearanceErrTooManyIcons */ L"çok fazla simge (en fazla 16 SVG simgesi, toplamda 256 simge)",
+    /* AppearanceErrWrite */ L"dosya yazılamadı",
+    /* AppearanceErrRead */ L"dosya okunamadı",
+    /* AppearanceErrTooLarge */ L"dosya 4 MiB sınırını aşıyor",
+    /* AppearanceErrNotAppearance */ L"bu bir görünüm dosyası değil",
+    /* AppearanceErrVersion */ L"desteklenmeyen biçim sürümü",
+    /* AppearanceErrInvalidValue */ L"geçersiz değer: {0}",
+    /* AppearanceErrDuplicateIcon */ L"yinelenen simge: {0}",
+    /* AppearanceErrJson */ L"dosya geçerli JSON değil",
+    /* AppearanceSvgSkipped */ L"Özel SVG simgeleri dışa aktarılmadı: {0}",
+    /* AppearanceReviewTitle */ L"Görünüm değişiklikleri",
+    /* AppearanceReviewIntro */ L"Bu değişiklikleri inceleyin. Uygula seçilene kadar hiçbir değişiklik uygulanmaz.",
+    /* AppearanceReviewNoChanges */ L"Bu dosya hiçbir şeyi değiştirmiyor.",
+    /* AppearanceReviewHeadingValues */ L"Renkler, eşikler ve düzen",
+    /* AppearanceReviewHeadingIcons */ L"Simgeler",
+    /* AppearanceChangeLine */ L"{0}: {1} \u2192 {2}",
+    /* AppearanceNotifyNote */ L"Eşik yüzdelerini değiştirmek, bildirimlerin ne zaman gönderileceğini de değiştirir.",
+    /* AppearanceIconMatched */ L"{0} ({1}): {2} \u2192 {3}",
+    /* AppearanceIconUnmatched */ L"{0} ({1}): eşleşen hesap yok, atlandı",
+    /* AppearanceIconSummary */ L"{0} / {1} simge buradaki bir hesapla eşleşiyor.",
+    /* AppearanceIconProviderLogo */ L"Sağlayıcı logosu",
+    /* AppearanceIconText */ L"Metin \"{0}\"",
+    /* AppearanceIconSvg */ L"Özel SVG",
+    /* AppearanceIconSvgUnsupported */ L"{0} ({1}): SVG simgesi atlandı: {2}",
+    /* AppearanceApplyButton */ L"Uygula",
+    /* AppearanceApplyFailed */ L"Görünüm uygulanamadı.",
+    /* AppearanceValuePx */ L"{0} px",
+    /* SettingsOpenFlyoutOnHover */ L"Üzerine gelince paneli aç",
+    /* SettingsOpenFlyoutOnHoverHelp */ L"İşaretçi bir kutucuğun üzerinde beklediğinde tıklamadan kullanım panelini gösterir.",
+    /* EditorAllowClaudeCliRenewal */ L"Claude Code süresi dolan oturumunu yenilesin",
+    /* EditorClaudeCliNotFound */ L"Claude Code bulunamadı",
+    /* EditorAllowClaudeCliRenewalHelp */ L"Claude Code oturumunun süresi dolduğunda, oturumu kendisinin yenilemesi için kancalarınız, eklentileriniz ve MCP sunucularınız olmadan Claude Code kısa süreliğine gizli olarak başlatılır. Modele hiçbir şey gönderilmez.",
+    /* SettingsGroupTaskbarTiles */ L"Görev çubuğu",
+    /* SettingsGroupFlyout */ L"Açılır panel",
+    /* SettingsGroupPreviewBackup */ L"Araçlar",
+    /* SettingsGroupTiles */ L"Kutucuklar",
+    /* SettingsGroupPlacement */ L"Yerleşim",
+    /* SettingsChooseNamedColor */ L"{0} seç",
+    /* CursorSignInInstructions */ L"Tarayıcıda oturum açmayı onaylayın. Cursor onayladığında bu pencere kapanır.",
+    /* CursorOnDemand */ L"İsteğe bağlı kullanım",
+    /* CopilotProvider */ L"GitHub Copilot",
+    /* CopilotMonthlyCredits */ L"Aylık yapay zekâ kredileri",
+    /* CopilotUnlimited */ L"Sınırsız",
+    /* CopilotSignInRequired */ L"Copilot kullanımını görmek için oturum açın veya mevcut Visual Studio / GitHub CLI hesabını kullanın.",
+    /* CopilotQuotaUnavailable */ L"Aylık yapay zekâ kredi hakkı kullanılamıyor.",
+    /* CopilotGithubLogin */ L"GitHub oturumu",
+    /* CopilotAutomaticLogin */ L"Otomatik",
+    /* CopilotBorrowedSignIn */ L"Visual Studio / GitHub CLI kullanır",
+    /* CommonMonthly */ L"Aylık",
+    /* FlyoutAmountOf */ L"{0} / {1} {2}",
+    /* FlyoutSubscription */ L"{0} Aboneliği",
+    /* EditorShowGeminiArc */ L"Gemini yayını göster",
+    /* EditorShowMonthlyCreditsArc */ L"Aylık yapay zekâ kredisi yayını göster",
+    /* FlyoutOther */ L"Diğer",
+    /* FlyoutGeminiWeekly */ L"Gemini haftalık",
+    /* EditorShowGeminiWeeklyArc */ L"Gemini haftalık yayını göster",
+    /* EditorShowOtherArc */ L"Diğer yayını göster",
+    /* EditorOtherArcHelp */ L"Antigravity uygulamasındaki Claude ve GPT gibi Gemini dışı modellerin kotaları.",
+    /* EditorShowOtherWeeklyArc */ L"Diğer haftalık yayını göster",
+    /* EditorOtherWeeklyArcHelp */ L"Antigravity uygulamasındaki Claude ve GPT gibi Gemini dışı modellerin kotaları.",
+    /* EditorShowFableWeeklyArc */ L"Fable haftalık yayını göster",
+    /* EditorFableWeeklyArcHelp */ L"Fable haftalık kullanımını (varsa) kutucukta gösterir.",
+    /* CopilotDeviceInstructions */ L"Bu kodu tarayıcınızda github.com/login/device adresine girin. Oturum açma tamamlandığında bu pencere kapanır.",
+    /* EditorShowOtherModelsUsage */ L"Diğer modellerin kullanımını göster",
+    /* EditorOtherModelsUsageHelp */ L"Ortak Claude/GPT havuzunun kullanımını ve sıfırlama zamanlarını açılır panelde ve araç ipucunda gösterir. Kutucuk yayları ve bildirimler kendi ayarlarını kullanır.",
+    /* AntigravityAutomaticSignInHelp */ L"Buradan oturum açana kadar çalışan Antigravity oturumunu otomatik olarak kullanır. Buradan açılan oturum ayrı saklanır ve uygulamanın kimlik bilgilerini asla değiştirmez.",
+    /* EditorAdditionalMeters */ L"Ek göstergeler",
+    /* EditorShowModelLimits */ L"Model ve kullanım alanı sınırlarını göster",
+    /* EditorModelLimitsHelp */ L"Bildirilen Claude model ve kullanım alanı kotalarını açılır panelde ve araç ipucunda gösterir. Fable haftalık için ayrı bir ayar vardır. Kutucuk yayları ve bildirimler değişmez.",
+    /* EditorShowAdditionalBuckets */ L"Ek kota gruplarını göster",
+    /* EditorAdditionalBucketsHelp */ L"Bildirilen diğer Antigravity kota gruplarını, sağlayıcının verdiği adlarla açılır panelde ve araç ipucunda gösterir. Kutucuk yayları ve bildirimler değişmez.",
+    /* MeterOpusWeekly */ L"Opus haftalık",
+    /* MeterSonnetWeekly */ L"Sonnet haftalık",
+    /* MeterNamedSession */ L"{0} oturum",
+    /* MeterNamedWeekly */ L"{0} haftalık",
+    /* MeterNamedHours */ L"{0} {1} saatlik",
+    /* MeterNamedDays */ L"{0} {1} günlük",
+    /* SettingsAbout */ L"Hakkında",
+    /* SettingsAboutVersion */ L"Sürüm {0}",
+    /* SettingsAboutByAuthor */ L"Geliştiren: {0}",
+    /* SettingsAboutViewOnGitHub */ L"GitHub üzerinde görüntüle",
+    /* SettingsSendFeedback */ L"Geri bildirim gönder",
+    /* SettingsAboutViewSource */ L"Kaynak kodunu görüntüle",
+    /* SettingsAboutMoreProjects */ L"{0} tarafından geliştirilen diğer projeler",
+    /* SettingsAboutCopyInfo */ L"Sürüm bilgisini kopyala",
+    /* SettingsAboutCopyInfoCaption */ L"Hata bildirimleri için sürüm ve Windows derlemesi",
+    /* SettingsAboutCopy */ L"Kopyala",
+    /* SettingsAboutCopied */ L"Kopyalandı",
+    /* SettingsGroupAcknowledgements */ L"Teşekkürler",
+    /* SettingsAboutRoleQuotaBars */ L"Projenin ilk çatallandığı kaynak",
+    /* SettingsAboutRoleMediaPlayer */ L"Açılır panel yapısı, akrilik arka plan ve düğme biçimi",
+    /* SettingsAboutRoleT3Code */ L"Kullanım göstergelerinin tasarımı için referans",
+    /* SettingsAboutRoleSimpleIcons */ L"Sağlayıcı logoları",
+    /* SettingsAboutSimpleIconsCommunity */ L"Simple Icons topluluğu",
+    /* SettingsGroupLicenses */ L"Lisanslar",
+    /* SettingsAboutMitLicense */ L"MIT Lisansı",
+    /* SettingsAboutLicenseText */ L"Lisans metni",
+    /* SettingsAboutThirdParty */ L"Üçüncü taraf lisansları",
+    /* SettingsAboutThirdPartyCaption */ L"Kullanılan kod ve görseller",
+    /* SettingsAboutMitIncluded */ L"MIT Lisansı, telif hakkı (c) {0}. Tam metni yukarıdaki lisanstır.",
+    /* SettingsAboutCc0 */ L"Logo çizim verileri, CC0 1.0 Universal (kamu malına adama). Atıf gerekmez.",
+    /* SettingsAboutViewLicense */ L"Lisansı görüntüle",
+    /* SettingsGroupNotices */ L"Bildirimler",
+    /* SettingsAboutDisclaimer */ L"Sorumluluk reddi",
+    /* SettingsAboutDisclaimerText */ L"Anthropic, Claude, OpenAI, Codex, Antigravity, Gemini, GitHub Copilot, Cursor ve bunların bağlı kuruluşlarıyla ilişkili adlar, ticari markalar, logolar ve diğer ayırt edici işaretler yalnızca ilgili hak sahiplerine aittir. Bu işaretlere yapılan atıflar veya kullanımlar yalnızca tanıtım ve bilgilendirme amaçlıdır; ilgili marka sahipleriyle bağlantı, sponsorluk, onay veya yetkilendirme anlamına gelmez.",
+    /* SettingsAboutUsage */ L"Kullanım",
+    /* SettingsAboutUsageText */ L"Kullanım verileri yalnızca sağlayıcıların belgelenmemiş uç noktalarından alınır; eksik, gecikmeli veya hatalı olabilir ve haber verilmeksizin değişebilir ya da çalışmayı durdurabilir. Geliştirici, sunulan bilgilerden veya doğruluklarından sorumlu değildir.",
+    /* SettingsAboutData */ L"Veri",
+    /* SettingsAboutDataText */ L"Oturum açma işlemi Claude Code, Codex, Antigravity, GitHub Copilot ve Cursor uygulamalarının herkese açık OAuth istemcilerini kullanır. CLI oturumunu kullanan hesaplarda yalnızca o oturum okunur; mod bu oturumu asla yenilemez, değiştirmez veya saklamaz. Bir hesap için izin verirseniz mod, oturumunun süresi dolduğunda Claude Code uygulamasını kancalarınız, eklentileriniz ve MCP sunucularınız olmadan gizli başlatır; Claude Code kendi kimlik bilgilerini yenileyip yeniden yazar.",
+    /* SettingsAboutPrivacy */ L"Gizlilik",
+    /* SettingsAboutPrivacyText */ L"Belirteçler yalnızca bu bilgisayarda, kullanıcı hesabınız için Windows DPAPI ile şifrelenerek saklanır. Her belirteç yalnızca onu veren sağlayıcının oturum açma ve kullanım uç noktalarına gönderilir. Telemetri gönderilmez.",
+    /* SettingsAboutNoWarranty */ L"Garanti yok",
+    /* SettingsAboutNoWarrantyText */ L"Olduğu gibi, hiçbir garanti olmaksızın sunulur. Yukarıdaki MIT Lisansına bakın.",
+    /* SettingsTilePosition */ L"Kutucuk konumu",
+    /* SettingsTilePositionCaption */ L"Kutucukların görev çubuğundaki konumu.",
+    /* SettingsTilePositionHelp */ L"Seçilen düğme yoksa veya başka bir mod aynı düğmenin yanına yerleştirilmişse kutucuklar tepsinin en soluna taşınır.",
+    /* TilePosTaskbarLeftOfStart */ L"Başlat düğmesinin solu",
+    /* TilePosTaskbarRightOfStart */ L"Başlat düğmesinin sağı",
+    /* TilePosTaskbarRightOfSearch */ L"Ara düğmesinin sağı",
+    /* TilePosTaskbarRightOfTaskView */ L"Görev Görünümü düğmesinin sağı",
+    /* TilePosTaskbarLeftOfWidgets */ L"Pencere Öğeleri düğmesinin solu",
+    /* TilePosTaskbarRightOfWidgets */ L"Pencere Öğeleri düğmesinin sağı",
+    /* TilePosTrayFarLeft */ L"Tepsinin en solu (varsayılan)",
+    /* TilePosTrayRightOfHiddenIcons */ L"Gizli simgelerin sağı",
+    /* TilePosTrayLeftOfNetwork */ L"Ağ/Ses düğmesinin solu",
+    /* TilePosTrayLeftOfClock */ L"Saatin solu",
+    /* TilePosTrayFarRight */ L"Tepsinin en sağı",
+};
+// ==== END STRINGS tr ====
 
 static_assert(sizeof(kStringsEn) / sizeof(*kStringsEn) == (int)Str::Count);
 static_assert(sizeof(kStringsEs) / sizeof(*kStringsEs) == (int)Str::Count);
 static_assert(sizeof(kStringsZhHans) / sizeof(*kStringsZhHans) == (int)Str::Count);
+static_assert(sizeof(kStringsTr) / sizeof(*kStringsTr) == (int)Str::Count);
 
-enum class UiLanguage { English, Spanish, ChineseSimplified };
+enum class UiLanguage { English, Spanish, ChineseSimplified, Turkish };
 static std::atomic<UiLanguage> g_uiLanguage{UiLanguage::English};
 
 static PCWSTR Tr(Str id) {
@@ -2194,6 +2697,7 @@ static PCWSTR Tr(Str id) {
     switch (g_uiLanguage.load(std::memory_order_relaxed)) {
         case UiLanguage::Spanish: translated = kStringsEs[index]; break;
         case UiLanguage::ChineseSimplified: translated = kStringsZhHans[index]; break;
+        case UiLanguage::Turkish: translated = kStringsTr[index]; break;
         default: break;
     }
     return translated ? translated : kStringsEn[index];
@@ -2227,6 +2731,7 @@ static UiLanguage UiLanguageFromTag(std::wstring_view raw) {
     std::transform(tag.begin(), tag.end(), tag.begin(),
                    [](wchar_t c) { return (wchar_t)towlower(c); });
     if (UiLanguagePrefix(tag, L"es")) return UiLanguage::Spanish;
+    if (UiLanguagePrefix(tag, L"tr")) return UiLanguage::Turkish;
     if (UiLanguagePrefix(tag, L"zh-hant") || tag == L"zh-tw" ||
         tag == L"zh-hk" || tag == L"zh-mo") return UiLanguage::English;
     if (UiLanguagePrefix(tag, L"zh-hans") || tag == L"zh-cn" ||
@@ -2237,7 +2742,12 @@ static UiLanguage UiLanguageFromTag(std::wstring_view raw) {
 static void ResolveUiLanguage() {
     ULONG count = 0, length = 0;
     UiLanguage chosen = UiLanguage::English;
-    if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &length) && length) {
+    PCWSTR setting = Wh_GetStringSetting(L"uiLanguage");
+    bool automatic = !setting[0] || wcscmp(setting, L"auto") == 0;
+    if (!automatic) chosen = UiLanguageFromTag(setting);
+    Wh_FreeStringSetting(setting);
+    if (automatic &&
+        GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &length) && length) {
         std::vector<wchar_t> tags(length);
         if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, tags.data(), &length)
             && !tags.empty() && tags[0]) {
@@ -2246,6 +2756,7 @@ static void ResolveUiLanguage() {
     }
     g_uiLanguage.store(chosen, std::memory_order_relaxed);
     Wh_Log(L"UI language: %s", chosen == UiLanguage::Spanish ? L"es" :
+           chosen == UiLanguage::Turkish ? L"tr" :
            chosen == UiLanguage::ChineseSimplified ? L"zh-Hans" : L"en");
 }
 
@@ -2282,7 +2793,7 @@ enum QuotaBarIndex {
 static constexpr int kMaxTileArcs = 3;
 
 struct AccountConfig {
-    std::wstring provider;  // "anthropic", "openai", "antigravity" or "copilot".
+    std::wstring provider;  // "anthropic", "openai", "antigravity", "copilot" or "cursor".
     std::wstring label;
     // GitHub login selection; never part of AccountIdentityHash and never stores credentials.
     std::wstring copilotLogin;
@@ -2453,6 +2964,7 @@ enum class AdditionalMeterSource {
     ClaudeLegacyOpus,
     ClaudeLegacySonnet,
     OpenAiLimit,
+    CursorUsage,
 };
 
 struct AdditionalMeter {
@@ -2464,6 +2976,7 @@ struct AdditionalMeter {
 static constexpr size_t kMaxAdditionalMeters = 16;
 
 struct AccountData {
+    WindowUsage cursorOnDemand;
     // Copilot uses only extraUsage for the monthly quota; these fields are not persisted.
     std::wstring copilotLogin;
     std::wstring copilotResetDate;
@@ -2482,9 +2995,9 @@ struct AccountData {
     std::vector<AdditionalMeter> additionalMeters;
     std::wstring plan;
     std::wstring extraLines;
-    // Amounts behind the extra-usage slot, in dollars (Anthropic) or credits (OpenAI);
-    // -1 when unknown. Left = limit - used. Used may go negative if a credits balance
-    // exceeds the configured max.
+    // Amounts behind the extra-usage slot, in dollars (Anthropic, Cursor on-demand) or
+    // credits (OpenAI); -1 when unknown. Left = limit - used. Used may go negative if a
+    // credits balance exceeds the configured max.
     double extraUsedAmount = -1;
     double extraLimitAmount = -1;
     // OpenAI prepaid credits; balance is -1 when the API reports none or hides it.
@@ -4409,6 +4922,7 @@ static PCWSTR ProviderDisplayName(const std::wstring& provider) {
     // Product names; the provider's internal keys do not change.
     if (provider == L"anthropic") return L"Claude";
     if (provider == L"openai") return L"Codex";
+    if (provider == L"cursor") return L"Cursor";
     if (provider == L"copilot") return Tr(Str::CopilotProvider);
     return L"Antigravity";
 }
@@ -4466,7 +4980,8 @@ static void OpenDashboardForIdentity(uint64_t identityHash) {
     if (provider == L"antigravity") {
         RefreshQuotaByIdentity(identityHash);
     } else {
-        OpenUrl(provider == L"copilot" ? L"https://github.com/settings/copilot" :
+        OpenUrl(provider == L"cursor" ? L"https://cursor.com/dashboard?tab=usage" :
+                provider == L"copilot" ? L"https://github.com/settings/copilot" :
                 provider == L"anthropic" ? L"https://claude.ai/settings/usage"
                                          : L"https://chatgpt.com/codex/cloud/settings/analytics#usage");
     }
@@ -5114,6 +5629,8 @@ static constexpr PCWSTR kOpenAiScope =
 static constexpr PCWSTR kOAuthUserAgent = L"taskbar-ai-usage/1.0";
 // Public client of github/copilot.vim, copilot-language-server/dist/main.js.
 static constexpr PCWSTR kCopilotClientId = L"Iv1.b507a08c87ecfe98";
+// Cursor IDE's public client ID used when renewing the session token.
+static constexpr PCWSTR kCursorClientId = L"KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
 static void WipeBuffer(std::string& buffer);
 static void WipeBuffer(std::wstring& buffer);
 static bool IsGithubLogin(std::wstring_view login);
@@ -5908,6 +6425,73 @@ static bool WaitForCopilotDevicePoll(CopilotDeviceLoginState& state, DWORD waitM
     return false;
 }
 
+// Cursor's JWT subject identifies the user whose cookie is sent to cursor.com.
+static bool ReadCursorClaims(StoredToken* token) {
+    auto claims = ParseJwtPayload(token->accessToken);
+    if (!claims) return false;
+    std::wstring subject = GetStr(claims, L"sub");
+    size_t separator = subject.rfind(L'|');
+    if (separator == std::wstring::npos || separator + 1 == subject.size()) return false;
+    token->accountId = subject.substr(separator + 1);
+    double exp = GetNum(claims, L"exp", 0);
+    if (!std::isfinite(exp) || exp <= 0 || exp > 253402300799.0) return false;
+    token->expiresMs = (ULONGLONG)(exp * 1000);
+    return true;
+}
+
+static void DoCursorLogin(const LoginRequest& req) {
+    CopilotDeviceLoginState state;  // Shared cancellable polling dialog and secret cleanup.
+    std::string verifier = RandomBase64Url(32);
+    OAuthSecretWiper verifierWiper{verifier};
+    std::string challenge = Sha256Base64Url(verifier);
+    if (verifier.empty() || challenge.empty()) return;
+    BYTE bytes[16];
+    if (BCryptGenRandom(nullptr, bytes, sizeof(bytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) return;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    std::wstring uuid;
+    for (int i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) uuid += L'-';
+        uuid += L"0123456789abcdef"[bytes[i] >> 4];
+        uuid += L"0123456789abcdef"[bytes[i] & 15];
+    }
+    state.dialog.deviceLogin = true;
+    state.window = CreateLoginInputDialog(L"Cursor", Tr(Str::CursorSignInInstructions), state.dialog);
+    if (!state.window || g_unloading) return;
+    ShowWindow(state.dialog.edit, SW_HIDE);
+    std::wstring url = L"https://cursor.com/loginDeepControl?challenge=" + Utf8ToWide(challenge) +
+                       L"&uuid=" + uuid + L"&mode=login";
+    OpenUrl(url.c_str());
+    std::wstring path = L"/auth/poll?uuid=" + uuid + L"&verifier=" + Utf8ToWide(verifier);
+    OAuthSecretWiper pathWiper{path};
+    ULONGLONG deadline = GetTickCount64() + 180000;
+    while (GetTickCount64() < deadline && WaitForCopilotDevicePoll(state, 2000)) {
+        if (GetTickCount64() >= deadline || CurrentAuthEpoch(req.idHash) != req.authEpoch) return;
+        auto result = HttpRequest(L"GET", L"api2.cursor.sh", path.c_str(), kOAuthUserAgent,
+                                  L"Accept: application/json\r\n", {}, true);
+        OAuthSecretWiper resultWiper{result.body};
+        if (!WaitForCopilotDevicePoll(state, 0) || GetTickCount64() >= deadline) return;
+        if (!result.ok || result.status == 404) continue;
+        if (result.status != 200) return;
+        std::wstring responseBody = Utf8ToWide(result.body);
+        OAuthSecretWiper responseBodyWiper{responseBody};
+        JsonObject root;
+        try {
+            root = JsonObject::Parse(responseBody);
+        } catch (...) {
+            continue;
+        }
+        state.token.accessToken = GetStr(root, L"accessToken");
+        if (state.token.accessToken.empty()) continue;
+        state.token.refreshToken = GetStr(root, L"refreshToken");
+        if (!ReadCursorClaims(&state.token)) return;
+        uint64_t savedIdentity = 0;
+        if (SaveStoredTokenIfCurrent(req.idHash, req.authEpoch, state.token, &savedIdentity) ==
+                TokenSaveResult::Saved) RefreshQuotaByIdentity(savedIdentity);
+        return;
+    }
+}
+
 static void DoCopilotLogin(const LoginRequest& req) {
     CopilotDeviceLoginState state;
     const std::wstring headers = L"Accept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\n";
@@ -6077,6 +6661,7 @@ static DWORD WINAPI LoginThreadProc(LPVOID param) {
             if (req->provider == L"anthropic") DoAnthropicLogin(*req);
             else if (req->provider == L"openai") DoOpenAiLogin(*req);
             else if (req->provider == L"copilot") DoCopilotLogin(*req);
+            else if (req->provider == L"cursor") DoCursorLogin(*req);
             else if (req->provider == L"antigravity") DoAntigravityLogin(*req);
         }
     } catch (...) {
@@ -6105,6 +6690,7 @@ static void StartLoginByIdentity(uint64_t identityHash) {
             });
         if (it == g_settings.accounts.end() ||
             (it->provider != L"anthropic" && it->provider != L"openai" && it->provider != L"antigravity" &&
+             it->provider != L"cursor" &&
              (it->provider != L"copilot" || !it->copilotLogin.empty()))) return;
         account = *it;
     }
@@ -8500,6 +9086,264 @@ static bool ParseCopilotUsage(const std::string& body, AccountData* data) {
     }
 }
 
+// Returns true when Cursor's billing window spans roughly a week (6-8 days).
+static bool IsCursorWeeklyWindow(ULONGLONG durationMs) {
+    return durationMs >= 6ULL * 86400000 && durationMs <= 8ULL * 86400000;
+}
+
+// Reads a JSON number or numeric string; returns def when missing or non-numeric.
+static double GetFlexNum(JsonObject const& o, PCWSTR name, double def = -1) {
+    if (!o || !o.HasKey(name)) return def;
+    auto v = o.GetNamedValue(name);
+    if (v.ValueType() == JsonValueType::Number) {
+        double val = v.GetNumber();
+        return std::isfinite(val) ? val : def;
+    }
+    if (v.ValueType() == JsonValueType::String) {
+        auto hs = v.GetString();
+        std::wstring s(hs.c_str(), hs.size());
+        size_t first = s.find_first_not_of(L" \t\r\n");
+        if (first == std::wstring::npos) return def;
+        wchar_t* end = nullptr;
+        double val = wcstod(s.c_str() + first, &end);
+        if (end == s.c_str() + first ||
+            s.find_first_not_of(L" \t\r\n", end - s.c_str()) != std::wstring::npos ||
+            !std::isfinite(val)) {
+            return def;
+        }
+        return val;
+    }
+    return def;
+}
+
+// Parses a Unix timestamp (seconds or milliseconds) from a number, numeric string, or ISO-8601 string.
+static ULONGLONG ParseCursorTimestampMs(JsonObject const& o, PCWSTR name) {
+    if (!o || !o.HasKey(name)) return 0;
+    constexpr ULONGLONG kMaxUnixMs = 253402300799000ULL;
+    auto toMs = [](ULONGLONG val) -> ULONGLONG {
+        if (val == 0) return 0;
+        ULONGLONG ms = val <= kUnixTimestampMsThreshold ? val * 1000ULL : val;
+        return ms <= kMaxUnixMs ? ms : 0;
+    };
+    auto v = o.GetNamedValue(name);
+    if (v.ValueType() == JsonValueType::Number) {
+        double n = v.GetNumber();
+        if (!std::isfinite(n) || n <= 0 || n > (double)kMaxUnixMs) return 0;
+        return toMs((ULONGLONG)n);
+    }
+    if (v.ValueType() != JsonValueType::String) return 0;
+    auto hs = v.GetString();
+    std::wstring s(hs.c_str(), hs.size());
+    size_t first = s.find_first_not_of(L" \t\r\n");
+    if (first == std::wstring::npos) return 0;
+    size_t last = s.find_last_not_of(L" \t\r\n");
+    std::wstring trimmed = s.substr(first, last - first + 1);
+    bool allDigits = true;
+    ULONGLONG val = 0;
+    for (wchar_t ch : trimmed) {
+        if (ch < L'0' || ch > L'9') {
+            allDigits = false;
+            break;
+        }
+        ULONGLONG digit = (ULONGLONG)(ch - L'0');
+        if (val > ((~0ULL) - digit) / 10ULL) return 0;
+        val = val * 10ULL + digit;
+    }
+    if (allDigits) return toMs(val);
+    return ParseIso8601Ms(trimmed);
+}
+
+static bool ParseCursorCurrentPeriodUsage(const std::string& body, AccountData* data) {
+    try {
+        std::wstring wideBody = Utf8ToWide(body);
+        OAuthSecretWiper wideBodyWiper{wideBody};
+        auto root = JsonObject::Parse(wideBody);
+        auto plan = GetObj(root, L"planUsage");
+        double pct = GetFlexNum(plan, L"totalPercentUsed", -1);
+        if (!std::isfinite(pct) || pct < 0) return false;
+        ULONGLONG start = ParseCursorTimestampMs(root, L"billingCycleStart");
+        ULONGLONG end = ParseCursorTimestampMs(root, L"billingCycleEnd");
+        ULONGLONG durationMs = (start > 0 && end > start) ? (end - start) : 0;
+        data->extraUsage = {pct, end, durationMs};
+        double autoPct = GetFlexNum(plan, L"autoPercentUsed", -1);
+        double apiPct = GetFlexNum(plan, L"apiPercentUsed", -1);
+        bool hasApi = std::isfinite(apiPct) && apiPct > 0;
+        if (std::isfinite(autoPct) && autoPct >= 0 &&
+            (hasApi || std::fabs(std::clamp(autoPct, 0.0, 100.0) -
+                                 std::clamp(pct, 0.0, 100.0)) >= 0.5)) {
+            WindowUsage window = data->extraUsage;
+            window.pct = autoPct;
+            AddAdditionalMeter(data, L"Auto", window, AdditionalMeterSource::CursorUsage);
+        }
+        if (hasApi) {
+            WindowUsage window = data->extraUsage;
+            window.pct = apiPct;
+            AddAdditionalMeter(data, L"API", window, AdditionalMeterSource::CursorUsage);
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Secondary enrichment from usage-summary: plan badge and on-demand spend only.
+// Failures here never disturb the primary usage reading.
+static void ParseCursorUsageSummary(const std::string& body, AccountData* data) {
+    try {
+        std::wstring wideBody = Utf8ToWide(body);
+        OAuthSecretWiper wideBodyWiper{wideBody};
+        auto root = JsonObject::Parse(wideBody);
+        std::wstring plan = GetStr(root, L"membershipType");
+        if (!plan.empty()) data->plan = std::move(plan);
+        auto usage = GetObj(root, L"individualUsage");
+        auto onDemand = GetObj(usage, L"onDemand");
+        double limit = GetFlexNum(onDemand, L"limit", -1);
+        double used = GetFlexNum(onDemand, L"used", -1);
+        if (GetBool(onDemand, L"enabled") && std::isfinite(limit) && limit > 0 &&
+            std::isfinite(used) && used >= 0 && std::isfinite(used / limit * 100)) {
+            data->cursorOnDemand = data->extraUsage;
+            data->cursorOnDemand.pct = used / limit * 100;
+            data->extraUsedAmount = used / 100;
+            data->extraLimitAmount = limit / 100;
+        }
+    } catch (...) {
+    }
+}
+
+static void FetchCursorAccount(const AccountConfig& account, AccountData* data,
+                               int* retryAfterSec, int fallbackRetrySec) {
+    if (g_unloading) return;
+    uint64_t identity = AccountIdentityHash(account);
+    ULONGLONG epoch = CurrentAuthEpoch(identity);
+    StoredToken token;
+    OAuthSecretWiper accessWiper{token.accessToken};
+    OAuthSecretWiper refreshWiper{token.refreshToken};
+    auto expired = [&]() {
+        data->stale = true;
+        data->needsLogin = true;
+        data->error = Tr(Str::StatusSessionExpiredClickToSignIn);
+    };
+    if (!LoadStoredToken(identity, &token)) {
+        data->stale = true;
+        data->needsLogin = true;
+        data->error = Tr(Str::StatusNotSignedInClickToSignIn);
+        return;
+    }
+    auto failed = [&](const HttpResult& result) {
+        data->stale = true;
+        if (!result.ok) data->error = Tr(Str::StatusNetworkError);
+        else if (result.status == 429) {
+            data->error = Tr(Str::StatusRateLimitedByAPI);
+            *retryAfterSec = result.retryAfterSec > 0 ? result.retryAfterSec : fallbackRetrySec;
+        } else {
+            data->error = TrFormat(Str::StatusHttp, {std::to_wstring(result.status)});
+            if (result.retryAfterSec > 0) *retryAfterSec = result.retryAfterSec;
+        }
+    };
+    bool refreshed = false;
+    auto renew = [&]() {
+        refreshed = true;
+        if (token.refreshToken.empty()) { expired(); return false; }
+        JsonObject request;
+        request.SetNamedValue(L"grant_type", JsonValue::CreateStringValue(L"refresh_token"));
+        request.SetNamedValue(L"client_id", JsonValue::CreateStringValue(kCursorClientId));
+        request.SetNamedValue(L"refresh_token", JsonValue::CreateStringValue(token.refreshToken));
+        std::string body = WideToUtf8(request.Stringify().c_str());
+        OAuthSecretWiper bodyWiper{body};
+        auto result = HttpRequest(L"POST", L"api2.cursor.sh", L"/oauth/token", kOAuthUserAgent,
+            L"Content-Type: application/json\r\nAccept: application/json\r\n", body, true);
+        OAuthSecretWiper resultWiper{result.body};
+        if (g_unloading || CurrentAuthEpoch(identity) != epoch) return false;
+        if (!result.ok || result.status != 200) {
+            if (result.ok && (result.status == 400 || result.status == 401 || result.status == 403)) expired();
+            else failed(result);
+            return false;
+        }
+        try {
+            std::wstring responseBody = Utf8ToWide(result.body);
+            OAuthSecretWiper responseBodyWiper{responseBody};
+            auto root = JsonObject::Parse(responseBody);
+            std::wstring access = GetStr(root, L"access_token");
+            OAuthSecretWiper newAccessWiper{access};
+            if (GetBool(root, L"shouldLogout") || access.empty()) { expired(); return false; }
+            std::wstring refresh = GetStr(root, L"refresh_token");
+            OAuthSecretWiper newRefreshWiper{refresh};
+            WipeBuffer(token.accessToken);
+            token.accessToken = access;
+            if (!refresh.empty()) {
+                WipeBuffer(token.refreshToken);
+                token.refreshToken = refresh;
+            }
+            if (!ReadCursorClaims(&token)) { expired(); return false; }
+        } catch (...) {
+            data->stale = true;
+            data->error = Tr(Str::StatusInvalidTokenResponse);
+            return false;
+        }
+        if (SaveStoredTokenIfCurrent(identity, epoch, token) != TokenSaveResult::Saved) {
+            data->stale = true;
+            data->error = Tr(Str::StatusCouldNotSaveRefreshedToken);
+            return false;
+        }
+        return true;
+    };
+    if (!ReadCursorClaims(&token)) { expired(); return; }
+    if (token.expiresMs <= NowUnixMs() + 300000 && !renew()) return;
+    auto requestUsage = [&]() {
+        std::wstring headers;
+        OAuthSecretWiper headerWiper{headers};
+        headers.reserve(token.accessToken.size() + 128);
+        headers.append(L"Authorization: Bearer ").append(token.accessToken)
+            .append(L"\r\nContent-Type: application/json\r\nConnect-Protocol-Version: 1\r\nAccept: application/json\r\n");
+        return HttpRequest(L"POST", L"api2.cursor.sh",
+                           L"/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+                           kOAuthUserAgent, headers, "{}", true);
+    };
+    HttpResult result = requestUsage();
+    OAuthSecretWiper resultBodyWiper{result.body};
+    if (!g_unloading && result.ok && (result.status == 401 || result.status == 403) && !refreshed) {
+        WipeBuffer(result.body);
+        if (!renew()) return;
+        result = requestUsage();
+    }
+    if (g_unloading || CurrentAuthEpoch(identity) != epoch) return;
+    if (!result.ok || result.status != 200) {
+        if (result.ok && (result.status == 401 || result.status == 403)) expired();
+        else failed(result);
+        return;
+    }
+    AccountData fresh;
+    if (!ParseCursorCurrentPeriodUsage(result.body, &fresh)) {
+        data->stale = true;
+        data->error = Tr(Str::StatusUnexpectedResponseFormat);
+        return;
+    }
+    WipeBuffer(result.body);
+
+    if (!token.accountId.empty()) {
+        auto requestUsageSummary = [&]() {
+            std::wstring headers;
+            OAuthSecretWiper headerWiper{headers};
+            std::wstring encodedAccountId = Utf8ToWide(UrlEncode(WideToUtf8(token.accountId)));
+            headers.reserve(encodedAccountId.size() + token.accessToken.size() + 96);
+            headers.append(L"Cookie: WorkosCursorSessionToken=").append(encodedAccountId)
+                .append(L"%3A%3A").append(token.accessToken).append(L"\r\nAccept: application/json\r\n");
+            return HttpRequest(L"GET", L"cursor.com", L"/api/usage-summary", kOAuthUserAgent,
+                               headers, {}, true);
+        };
+        HttpResult summary = requestUsageSummary();
+        OAuthSecretWiper summaryBodyWiper{summary.body};
+        if (g_unloading || CurrentAuthEpoch(identity) != epoch) return;
+        if (summary.ok && summary.status == 200) {
+            ParseCursorUsageSummary(summary.body, &fresh);
+        }
+    }
+
+    fresh.lastSuccessMs = NowUnixMs();
+    fresh.stale = false;
+    *data = std::move(fresh);
+}
+
 // GitHub allows renewing device-flow tokens without a client secret. This function only receives
 // credentials issued and stored by the mod.
 static TokenEndpointResult RefreshOwnedCopilotToken(StoredToken* token, int* retryAfterSec) {
@@ -8800,6 +9644,10 @@ static void FetchAccount(const AccountConfig& acc, AccountData* d, int* retryAft
     d->retryDeadlineMs = 0;
     d->needsLogin = false;
 
+    if (acc.provider == L"cursor") {
+        FetchCursorAccount(acc, d, retryAfterSec, fallbackRetrySec);
+        return;
+    }
     // Copilot uses its own session or borrows someone else's read-only.
     if (acc.provider == L"copilot") {
         FetchCopilotAccount(acc, d, retryAfterSec, fallbackRetrySec);
@@ -9396,6 +10244,7 @@ static void FireThresholdNotification(const std::wstring& title, const std::wstr
     std::wstring url;
     if (provider == L"anthropic") url = L"https://claude.ai/settings/usage";
     else if (provider == L"openai") url = L"https://chatgpt.com/codex/cloud/settings/analytics#usage";
+    else if (provider == L"cursor") url = L"https://cursor.com/dashboard?tab=usage";
     else if (provider == L"copilot") url = L"https://github.com/settings/copilot";
     if (ShowToastNotification(title, body, detail, url, quotaTag, identityHash) !=
         ToastResult::Failed) {
@@ -9928,6 +10777,10 @@ static DWORD WINAPI FetchThreadProc(LPVOID) {
                             quotaName = w == kFiveHourBar ? L"Gemini" :
                                         w == kWeeklyBar ? Tr(Str::FlyoutGeminiWeekly) :
                                         w == kOtherBar ? Tr(Str::FlyoutOther) : Tr(Str::FlyoutOtherWeekly);
+                        } else if (publishedAccounts[i].provider == L"cursor") {
+                            quotaName = IsCursorWeeklyWindow(wu.windowDurationMs)
+                                            ? Tr(Str::NotificationQuotaWeekly)
+                                            : Tr(Str::CommonMonthly);
                         } else if (publishedAccounts[i].provider == L"copilot") {
                             quotaName = Tr(Str::CopilotMonthlyCredits);
                         } else if (publishedAccounts[i].provider == L"openai" &&
@@ -9953,6 +10806,8 @@ static DWORD WINAPI FetchThreadProc(LPVOID) {
                         FireThresholdNotification(
                             titleText, body, pace, publishedAccounts[i].provider,
                             publishedAccounts[i].provider == L"copilot" ? L"monthly" :
+                            publishedAccounts[i].provider == L"cursor"
+                                ? (IsCursorWeeklyWindow(wu.windowDurationMs) ? L"weekly" : L"monthly") :
                             w == kFiveHourBar ? L"session" : w == kWeeklyBar ? L"weekly" :
                             w == kFableWeeklyBar ? L"fable" : w == kOtherBar ? L"other" :
                             w == kOtherWeeklyBar ? L"other-weekly" : L"extra",
@@ -10566,6 +11421,7 @@ static Style MakeButtonStyle(UiColor hover, UiColor pressed, UiColor hoverBorder
 
 // Simple Icons paths (CC0); viewBox 0 0 24 24.
 static PCWSTR ProviderLogoPathData(std::wstring const& provider) {
+    if (provider == L"cursor") return L"M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23";
     if (provider == L"copilot") {
         return L"M23.922 16.997C23.061 18.492 18.063 22.02 12 22.02 5.937 22.02.939 18.492.078 16.997A.641.641 0 0 1 0 16.741v-2.869a.883.883 0 0 1 .053-.22c.372-.935 1.347-2.292 2.605-2.656.167-.429.414-1.055.644-1.517a10.098 10.098 0 0 1-.052-1.086c0-1.331.282-2.499 1.132-3.368.397-.406.89-.717 1.474-.952C7.255 2.937 9.248 1.98 11.978 1.98c2.731 0 4.767.957 6.166 2.093.584.235 1.077.546 1.474.952.85.869 1.132 2.037 1.132 3.368 0 .368-.014.733-.052 1.086.23.462.477 1.088.644 1.517 1.258.364 2.233 1.721 2.605 2.656a.841.841 0 0 1 .053.22v2.869a.641.641 0 0 1-.078.256Zm-11.75-5.992h-.344a4.359 4.359 0 0 1-.355.508c-.77.947-1.918 1.492-3.508 1.492-1.725 0-2.989-.359-3.782-1.259a2.137 2.137 0 0 1-.085-.104L4 11.746v6.585c1.435.779 4.514 2.179 8 2.179 3.486 0 6.565-1.4 8-2.179v-6.585l-.098-.104s-.033.045-.085.104c-.793.9-2.057 1.259-3.782 1.259-1.59 0-2.738-.545-3.508-1.492a4.359 4.359 0 0 1-.355-.508Zm2.328 3.25c.549 0 1 .451 1 1v2c0 .549-.451 1-1 1-.549 0-1-.451-1-1v-2c0-.549.451-1 1-1Zm-5 0c.549 0 1 .451 1 1v2c0 .549-.451 1-1 1-.549 0-1-.451-1-1v-2c0-.549.451-1 1-1Zm3.313-6.185c.136 1.057.403 1.913.878 2.497.442.544 1.134.938 2.344.938 1.573 0 2.292-.337 2.657-.751.384-.435.558-1.15.558-2.361 0-1.14-.243-1.847-.705-2.319-.477-.488-1.319-.862-2.824-1.025-1.487-.161-2.192.138-2.533.529-.269.307-.437.808-.438 1.578v.021c0 .265.021.562.063.893Zm-1.626 0c.042-.331.063-.628.063-.894v-.02c-.001-.77-.169-1.271-.438-1.578-.341-.391-1.046-.69-2.533-.529-1.505.163-2.347.537-2.824 1.025-.462.472-.705 1.179-.705 2.319 0 1.211.175 1.926.558 2.361.365.414 1.084.751 2.657.751 1.21 0 1.902-.394 2.344-.938.475-.584.742-1.44.878-2.497Z";
     }
@@ -10605,7 +11461,8 @@ static FrameworkElement MakeProviderLogo(std::wstring const& provider, double si
     } catch (...) {
         Wh_Log(L"MakeProviderLogo: XamlReader failed");
         TextBlock fallback;
-        fallback.Text(provider == L"openai" ? L"O" : provider == L"anthropic" ? L"A" : L"G");
+        fallback.Text(provider == L"openai" ? L"O" : provider == L"anthropic" ? L"A" :
+            provider == L"cursor" ? L"C" : L"G");
         fallback.FontSize(size * 0.8);
         fallback.Foreground(FlyoutSolidBrush(fill));
         fallback.IsHitTestVisible(false);
@@ -11154,6 +12011,7 @@ static AccountViewModel BuildAccountModel(AccountConfig const& account, AccountD
     bool antigravity = account.provider == L"antigravity";
     bool openAi = account.provider == L"openai";
     bool copilot = account.provider == L"copilot";
+    bool cursor = account.provider == L"cursor";
     ULONGLONG staleAfterMs = (antigravity && d.antigravityLocalRoute ? 1ULL :
                              (ULONGLONG)s.intervalMin) * 2 * 60000;
     bool stale = d.stale || d.lastSuccessMs == 0 || now - d.lastSuccessMs > staleAfterMs;
@@ -11167,7 +12025,7 @@ static AccountViewModel BuildAccountModel(AccountConfig const& account, AccountD
     if (!(openAi && planIsSpark && !account.showOpenAiExtraLimits)) m.plan = FormatPlanName(d.plan);
     if (!m.plan.empty()) {
         // The subscription's commercial name may differ from the program lending the token.
-        std::wstring product = openAi ? L"ChatGPT" : copilot ? L"GitHub Copilot" :
+        std::wstring product = openAi ? L"ChatGPT" : cursor ? L"Cursor" : copilot ? L"GitHub Copilot" :
                                account.provider == L"anthropic" ? L"Claude Code" : L"Antigravity";
         m.planTip = visualTestMode ? m.plan :
             TrFormat(Str::FlyoutSubscription, {product + L" " + m.plan});
@@ -11308,11 +12166,14 @@ static AccountViewModel BuildAccountModel(AccountConfig const& account, AccountD
                 (currency ? Str::CommonSpent : Str::CommonUsed))});
     };
     bool creditsShown = false;
-    if (copilot && account.showBars[kExtraUsageBar] && d.extraUsage.pct >= 0) {
+    if ((copilot || cursor) && account.showBars[kExtraUsageBar] && d.extraUsage.pct >= 0) {
         // addSection adds the reset in local time ("Resets in …"); the separate UTC date
         // (2026-11-01 next to "Sat 18:00") contradicted it visually. With a limited quota the large
         // value follows the mode and the amounts preference; the pill keeps the total.
-        addSection(Tr(Str::CommonMonthly), d.extraUsage, L"");
+        addSection(cursor && IsCursorWeeklyWindow(d.extraUsage.windowDurationMs)
+                       ? Tr(Str::CommonWeekly)
+                       : Tr(Str::CommonMonthly),
+                   d.extraUsage, L"");
         auto& section = m.sections.back();
         if (d.copilotUnlimited) {
             section.value = Tr(Str::CopilotUnlimited);
@@ -11355,9 +12216,23 @@ static AccountViewModel BuildAccountModel(AccountConfig const& account, AccountD
             if (!name.empty() && std::isfinite(usage.pct) && usage.pct >= 0) addSection(name, usage, L"");
         }
     }
+    if (cursor && std::isfinite(d.cursorOnDemand.pct) && d.cursorOnDemand.pct >= 0) {
+        addSection(Tr(Str::CursorOnDemand), d.cursorOnDemand, L"");
+        auto& sec = m.sections.back();
+        if (d.extraLimitAmount > 0 && d.extraUsedAmount >= 0) {
+            setAmount(sec, d.extraUsedAmount, d.extraLimitAmount, true, false);
+            if (s.showExtraBarAmounts) {
+                double amount = remaining ? d.extraLimitAmount - d.extraUsedAmount
+                                          : d.extraUsedAmount;
+                swprintf(line, ARRAYSIZE(line), L"$%.2f", std::max(amount, 0.0));
+                sec.value = line;
+                sec.suffix = remaining ? Tr(Str::CommonLeft) : Tr(Str::CommonSpent);
+            }
+        }
+    }
     for (const auto& meter : d.additionalMeters) {
         bool codexMeter = meter.source == AdditionalMeterSource::OpenAiLimit;
-        bool visible = codexMeter ? openAi && account.showOpenAiExtraLimits :
+        bool visible = meter.source == AdditionalMeterSource::CursorUsage ? cursor : codexMeter ? openAi && account.showOpenAiExtraLimits :
             account.provider == L"anthropic" && account.showModelLimits;
         if (!visible || meter.name.empty() || !std::isfinite(meter.usage.pct) || meter.usage.pct < 0) continue;
         std::wstring title = meter.source == AdditionalMeterSource::ClaudeLegacyOpus ? Tr(Str::MeterOpusWeekly) :
@@ -11435,6 +12310,7 @@ static AccountViewModel BuildAccountModel(AccountConfig const& account, AccountD
         for (size_t k = 0; k < m.sections.size(); k++) {
             tip += L"\n" + TrFormat(Str::FlyoutQuotaTooltip,
                 {m.sections[k].title, m.sections[k].value, m.sections[k].suffix});
+            if (cursor && !m.sections[k].amountTip.empty()) tip += L"\n" + m.sections[k].amountTip;
         }
         if (!m.notes.empty()) tip += L"\n" + m.notes;
         // With an active retry wait the tooltip repeats the notice with its countdown.
@@ -14274,19 +15150,24 @@ static void NormalizeSettings(Settings* s) {
     std::vector<AccountConfig> accounts;
     for (auto& a : s->accounts) {
         if (a.provider != L"anthropic" && a.provider != L"openai" &&
-            a.provider != L"antigravity" && a.provider != L"copilot") {
+            a.provider != L"antigravity" && a.provider != L"copilot" && a.provider != L"cursor") {
             continue;
         }
         // Labels are stable identities; only the native editor trims deliberate edits.
         if (a.label.empty()) {
             a.label = a.provider == L"anthropic" ? L"A" :
-                      a.provider == L"openai" ? L"O" : a.provider == L"copilot" ? L"C" : L"G";
+                      a.provider == L"openai" ? L"O" : a.provider == L"copilot" ? L"C" : a.provider == L"cursor" ? L"Cursor" : L"G";
         }
         // Fable is fetched even when its row is hidden (it only notifies with the row visible). Its
         // arc (showFableWeeklyArc) is separate and needs the row.
         a.showBars[kFableWeeklyBar] = a.provider == L"anthropic";
         if (a.provider != L"openai") a.creditsMax = 0;
         if (a.provider == L"antigravity") a.useCliLogin = false;
+        if (a.provider == L"cursor") {
+            a.useCliLogin = false;
+            a.showBars.fill(false);
+            a.showBars[kExtraUsageBar] = true;
+        }
         if (a.provider != L"anthropic" || !a.useCliLogin) a.allowCliRenewal = false;
         if (a.provider == L"copilot") {
             a.useCliLogin = false;
@@ -15756,7 +16637,7 @@ struct AccountEditorState {
     StagedIconAsset stagedIcon;
     // Provider logos in white (only alpha counts), by list index; drawn with the theme color when
     // painting the icon's square button.
-    std::array<std::vector<uint32_t>, 4> logoPixels;
+    std::array<std::vector<uint32_t>, 5> logoPixels;
     std::vector<std::wstring> copilotLogins;
     // Provider the checkboxes currently show, and the state of the third-arc checkbox before
     // switching to Copilot, which checks and disables it; restored when switching back to another
@@ -23038,7 +23919,8 @@ static void RefreshAccountList(SettingsWindowState& state, bool force = true) {
         if (accounts[i].showBars[kOtherBar]) addBar(Tr(Str::FlyoutOther));
         if (accounts[i].showBars[kOtherWeeklyBar]) addBar(Tr(Str::FlyoutOtherWeekly));
         if (accounts[i].showBars[kExtraUsageBar]) {
-            PCWSTR name = accounts[i].provider == L"copilot" ? Tr(Str::CopilotMonthlyCredits) :
+            PCWSTR name = accounts[i].provider == L"cursor" ? Tr(Str::CommonMonthly) :
+                          accounts[i].provider == L"copilot" ? Tr(Str::CopilotMonthlyCredits) :
                           accounts[i].provider == L"openai" ? Tr(Str::SettingsColumnCredits) : Tr(Str::SettingsColumnExtra);
             if (!bars.empty()) bars += L", ";
             bars += name;
@@ -23987,7 +24869,7 @@ static bool ParseAppearanceJson(const std::string& body, const Settings& current
                 icon.label = GetStr(object, L"label");
                 std::wstring mode = GetStr(object, L"mode");
                 if (icon.provider != L"anthropic" && icon.provider != L"openai" &&
-                    icon.provider != L"antigravity" && icon.provider != L"copilot") {
+                    icon.provider != L"antigravity" && icon.provider != L"copilot" && icon.provider != L"cursor") {
                     return invalid(L"provider");
                 }
                 if (icon.label.empty() || icon.label.size() > 64) return invalid(L"label");
@@ -24680,14 +25562,14 @@ static constexpr UINT_PTR kEditorCliRenewalTool = 2;
 
 // Arc checkboxes per provider (list index): Codex three, Claude four (session, weekly, Fable weekly
 // and extra usage; at most three checked), Antigravity four (Gemini and Other, session and weekly;
-// at most three checked) and Copilot one (credits, fixed).
+// at most three checked), Copilot one (credits, fixed) and Cursor one (included quota, fixed).
 static int EditorArcCheckCount(int providerIndex) {
-    return providerIndex == 3 ? 1 : providerIndex == 1 ? 3 : 4;
+    return providerIndex >= 3 ? 1 : providerIndex == 1 ? 3 : 4;
 }
 
 // Additional quotas per provider; the last card holds the CLI or GitHub session.
 static bool EditorHasProviderOptions(int providerIndex) { return providerIndex <= 2; }
-static bool EditorHasLoginCard(int providerIndex) { return providerIndex != 2; }
+static bool EditorHasLoginCard(int providerIndex) { return providerIndex != 2 && providerIndex != 4; }
 
 // Claude's login card has a second row: the renewal checkbox nested under the CLI sign-in.
 static int EditorLoginCardHeight(UINT dpi, int providerIndex) {
@@ -24785,7 +25667,7 @@ static void LayoutAccountEditor(HWND hWnd, AccountEditorState& state) {
     state.scrollExtent = std::max(0, contentHeight - height);
     state.scrollY = std::clamp(state.scrollY, 0, state.scrollExtent);
     auto extra = [&](EditorMessageField field) { return state.messages[(size_t)field].height; };
-    bool copilot = providerIndex == 3;
+    bool copilot = providerIndex >= 3;  // Copilot and Cursor each have a single fixed arc.
     int arcsHeight = sc(12) + sc(20) + sc(4) + EditorArcCheckCount(providerIndex) * sc(kEditorCheckHeight) + sc(8);
     const int heights[] = {sc(kEditorCardHeight), sc(kEditorCardHeight) + extra(EditorMessageField::Label),
                            sc(kEditorCardHeight) + extra(EditorMessageField::Icon),
@@ -25180,10 +26062,10 @@ static void UpdateAccountEditorProvider(HWND hWnd) {
     bool anthropic = providerIndex == 0;
     bool openai = providerIndex == 1;
     bool antigravity = providerIndex == 2;
-    bool copilot = providerIndex == 3;
+    bool copilot = providerIndex >= 3;  // Copilot and Cursor each have a single fixed arc.
     auto* state = reinterpret_cast<AccountEditorState*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
-    // Only the chosen provider's controls: Antigravity has no third arc or CLI session, and Copilot
-    // only has its credits arc and the GitHub login.
+    // Only the chosen provider's controls: Antigravity has no third arc or CLI session, Copilot
+    // has its credits arc and GitHub login, and Cursor has its included quota arc.
     ShowWindow(GetDlgItem(hWnd, kAccountFiveHour), copilot ? SW_HIDE : SW_SHOW);
     ShowWindow(GetDlgItem(hWnd, kAccountWeekly), copilot ? SW_HIDE : SW_SHOW);
     ShowWindow(GetDlgItem(hWnd, kAccountExtraUsage), antigravity ? SW_HIDE : SW_SHOW);
@@ -25194,7 +26076,7 @@ static void UpdateAccountEditorProvider(HWND hWnd) {
     ShowWindow(GetDlgItem(hWnd, kAccountCliRenewal), anthropic ? SW_SHOW : SW_HIDE);
     UpdateEditorCliRenewal(hWnd);
     for (int id : {kAccountCopilotLoginLabel, kAccountCopilotLogin}) {
-        ShowWindow(GetDlgItem(hWnd, id), copilot ? SW_SHOW : SW_HIDE);
+        ShowWindow(GetDlgItem(hWnd, id), providerIndex == 3 ? SW_SHOW : SW_HIDE);
     }
     ShowWindow(GetDlgItem(hWnd, kAccountFableWeekly), anthropic ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(hWnd, kAccountModelLimits), anthropic ? SW_SHOW : SW_HIDE);
@@ -25206,10 +26088,10 @@ static void UpdateAccountEditorProvider(HWND hWnd) {
                    antigravity ? Tr(Str::EditorShowGeminiArc) : Tr(Str::EditorShow5HourSessionArc));
     SetWindowTextW(GetDlgItem(hWnd, kAccountWeekly),
                    antigravity ? Tr(Str::EditorShowGeminiWeeklyArc) : Tr(Str::EditorShowWeeklyArc));
-    // Copilot has a single arc: the checkbox stays checked and disabled, and switching back to
-    // another provider restores its earlier state.
+    // Copilot and Cursor each have a single arc: the checkbox stays checked and disabled, and
+    // switching back to another provider restores its earlier state.
     HWND extraUsage = GetDlgItem(hWnd, kAccountExtraUsage);
-    if (state && copilot != (state->shownProvider == 3)) {
+    if (state && copilot != (state->shownProvider >= 3)) {
         if (copilot) {
             if (state->shownProvider >= 0) {
                 state->extraCheckBeforeCopilot =
@@ -25224,6 +26106,7 @@ static void UpdateAccountEditorProvider(HWND hWnd) {
     EnableWindow(extraUsage, anthropic || openai);
     UpdateEditorArcLimit(hWnd);
     SetWindowTextW(extraUsage, openai ? Tr(Str::EditorShowCreditsArcMax) :
+                               providerIndex == 4 ? Tr(Str::CommonMonthly) :
                                copilot ? Tr(Str::EditorShowMonthlyCreditsArc) :
                                          Tr(Str::EditorShowMonthlyExtraUsageArc));
     InvalidateRect(extraUsage, nullptr, TRUE);
@@ -25273,7 +26156,7 @@ static const std::vector<uint32_t>* EditorLogoPixels(HWND hWnd, AccountEditorSta
     if (index < 0 || index >= (int)state.logoPixels.size()) return nullptr;
     std::vector<uint32_t>& pixels = state.logoPixels[index];
     if (pixels.empty()) {
-        PCWSTR providers[] = {L"anthropic", L"openai", L"antigravity", L"copilot"};
+        PCWSTR providers[] = {L"anthropic", L"openai", L"antigravity", L"copilot", L"cursor"};
         std::wstring svg = L"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
                            L"<path fill=\"#FFFFFF\" d=\"";
         svg += ProviderLogoPathData(providers[index]);
@@ -25516,10 +26399,11 @@ static LRESULT CALLBACK AccountEditorWndProc(HWND hWnd, UINT message,
                                              GetModuleHandleW(nullptr), nullptr);
             InstallFluentCombo(provider, &state->theme);
             AddComboItems(provider, {ProviderDisplayName(L"anthropic"), ProviderDisplayName(L"openai"),
-                                     ProviderDisplayName(L"antigravity"), ProviderDisplayName(L"copilot")});
+                                     ProviderDisplayName(L"antigravity"), ProviderDisplayName(L"copilot"),
+                                     ProviderDisplayName(L"cursor")});
             int providerIndex = state->account.provider == L"openai" ? 1 :
                                 state->account.provider == L"antigravity" ? 2 :
-                                state->account.provider == L"copilot" ? 3 : 0;
+                                state->account.provider == L"copilot" ? 3 : state->account.provider == L"cursor" ? 4 : 0;
             SendMessageW(provider, CB_SETCURSEL, providerIndex, 0);
 
             HWND labelLabel = CreateWindowExW(0, L"STATIC", Tr(Str::CommonLabel), WS_CHILD | WS_VISIBLE,
@@ -25885,9 +26769,9 @@ static LRESULT CALLBACK AccountEditorWndProc(HWND hWnd, UINT message,
                 UpdateAccountEditorProvider(hWnd);
                 if (state->adding && !state->labelCustomized) {
                     // A new account's label follows the provider until it is edited.
-                    static constexpr PCWSTR providers[] = {L"anthropic", L"openai", L"antigravity", L"copilot"};
+                    static constexpr PCWSTR providers[] = {L"anthropic", L"openai", L"antigravity", L"copilot", L"cursor"};
                     int selected = (int)SendDlgItemMessageW(hWnd, kAccountProvider, CB_GETCURSEL, 0, 0);
-                    if (selected >= 0 && selected < 4) {
+                    if (selected >= 0 && selected < 5) {
                         std::wstring label;
                         {
                             std::lock_guard<std::mutex> lk(g_settingsMutex);
@@ -25921,15 +26805,15 @@ static LRESULT CALLBACK AccountEditorWndProc(HWND hWnd, UINT message,
                                                               CB_GETCURSEL, 0, 0);
                 candidate.provider = providerIndex == 1 ? L"openai" :
                                      providerIndex == 2 ? L"antigravity" :
-                                     providerIndex == 3 ? L"copilot" : L"anthropic";
+                                     providerIndex == 3 ? L"copilot" : providerIndex == 4 ? L"cursor" : L"anthropic";
                 int loginIndex = (int)SendDlgItemMessageW(hWnd, kAccountCopilotLogin, CB_GETCURSEL, 0, 0) - 1;
                 candidate.copilotLogin = providerIndex == 3 && loginIndex >= 0 &&
                     loginIndex < (int)state->copilotLogins.size() ? state->copilotLogins[loginIndex] : L"";
                 candidate.label = std::move(label);
                 candidate.showBars[kFiveHourBar] =
-                    providerIndex != 3 && IsDlgButtonChecked(hWnd, kAccountFiveHour) == BST_CHECKED;
+                    providerIndex < 3 && IsDlgButtonChecked(hWnd, kAccountFiveHour) == BST_CHECKED;
                 candidate.showBars[kWeeklyBar] =
-                    providerIndex != 3 && IsDlgButtonChecked(hWnd, kAccountWeekly) == BST_CHECKED;
+                    providerIndex < 3 && IsDlgButtonChecked(hWnd, kAccountWeekly) == BST_CHECKED;
                 candidate.showBars[kOtherBar] =
                     providerIndex == 2 && IsDlgButtonChecked(hWnd, kAccountOther) == BST_CHECKED;
                 candidate.showBars[kOtherWeeklyBar] =
@@ -25953,7 +26837,7 @@ static LRESULT CALLBACK AccountEditorWndProc(HWND hWnd, UINT message,
                     IsDlgButtonChecked(hWnd, kAccountAdditionalBuckets) == BST_CHECKED;
                 bool openai = candidate.provider == L"openai";
                 candidate.showBars[kExtraUsageBar] =
-                    providerIndex == 3 || ((candidate.provider == L"anthropic" || openai) &&
+                    providerIndex >= 3 || ((candidate.provider == L"anthropic" || openai) &&
                     IsDlgButtonChecked(hWnd, kAccountExtraUsage) == BST_CHECKED);
                 candidate.creditsMax =
                     openai ? (int)GetDlgItemInt(hWnd, kAccountCreditsMax, nullptr, FALSE) : 0;
@@ -26210,7 +27094,7 @@ static bool ShowAccountEditor(HWND owner, AccountConfig* account, bool adding) {
     RECT frame{0, 0, ScaleForDpi(g_uiLanguage.load(std::memory_order_relaxed) == UiLanguage::English ? kEditorClientWidth : 540, dpi),
                AccountEditorClientHeight(dpi, account->provider == L"openai" ? 1 :
                                               account->provider == L"antigravity" ? 2 :
-                                              account->provider == L"copilot" ? 3 : 0)};
+                                              account->provider == L"copilot" ? 3 : account->provider == L"cursor" ? 4 : 0)};
     using AdjustWindowRectExForDpi_t = BOOL(WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
     auto adjustWindowRectExForDpi = reinterpret_cast<AdjustWindowRectExForDpi_t>(
         GetProcAddress(GetModuleHandleW(L"user32.dll"), "AdjustWindowRectExForDpi"));
@@ -26489,7 +27373,8 @@ static void RemoveAccountFromSettingsWindow(SettingsWindowState& state) {
     }
     bool deleteToken = false;
     bool hasOwnedToken = HasStoredTokenValue(AccountIdentityHash(account));
-    if ((account.provider == L"antigravity" || account.provider == L"copilot") && !hasOwnedToken) {
+    if ((account.provider == L"antigravity" || account.provider == L"copilot" ||
+         account.provider == L"cursor") && !hasOwnedToken) {
         int result = SettingsMessageBoxW(state.hWnd, Tr(Str::SettingsRemoveAccountBody),
                                  Tr(Str::SettingsRemoveThisAccount),
                                  MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION, nullptr,
@@ -28357,6 +29242,11 @@ BOOL Wh_ModInit() {
         Wh_Log(L"WSAStartup failed; OpenAI sign-in unavailable");
     }
     return TRUE;
+}
+
+void Wh_ModSettingsChanged() {
+    // Existing windows keep their controls; newly opened windows use this language.
+    ResolveUiLanguage();
 }
 
 void Wh_ModAfterInit() {
